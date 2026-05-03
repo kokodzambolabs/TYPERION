@@ -1,0 +1,240 @@
+'use server';
+
+// Server Actions po stronie usera dla strony /mecze:
+//   - zapiszTyp        - zapis/edycja typu pojedynczego meczu
+//   - pobierzWiecejMeczow - paginacja sekcji "Nadchodzące" / "Zakończone"
+// RLS w bazie wymusza user_id = auth.uid() i kickoff_at > now() - tu robimy
+// dodatkowo defense in depth, żeby zwrócić ładny komunikat zamiast wyjątku.
+
+import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
+import { createClient } from '@/lib/supabase/server';
+import { klasyfikujMecze } from '@/lib/klasyfikacjaMeczow';
+
+const SchematTypu = z.object({
+  matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
+  homeScore: z.coerce
+    .number()
+    .int({ message: 'Wynik musi być liczbą całkowitą.' })
+    .min(0, { message: 'Wynik nie może być ujemny.' })
+    .max(20, { message: 'Wynik max 20.' }),
+  awayScore: z.coerce
+    .number()
+    .int({ message: 'Wynik musi być liczbą całkowitą.' })
+    .min(0, { message: 'Wynik nie może być ujemny.' })
+    .max(20, { message: 'Wynik max 20.' }),
+});
+
+export async function zapiszTyp(_prev, formData) {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: 'Brak sesji - zaloguj się ponownie.' };
+
+  const parsed = SchematTypu.safeParse({
+    matchId: formData.get('matchId'),
+    homeScore: formData.get('homeScore'),
+    awayScore: formData.get('awayScore'),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const { matchId, homeScore, awayScore } = parsed.data;
+
+  const { data: mecz, error: meczE } = await supabase
+    .from('matches')
+    .select('id, kickoff_at')
+    .eq('id', matchId)
+    .single();
+  if (meczE || !mecz) return { error: 'Mecz nie istnieje.' };
+
+  if (new Date(mecz.kickoff_at) <= new Date()) {
+    return { error: 'Typowanie zamknięte - mecz już się rozpoczął.' };
+  }
+
+  const teraz = new Date().toISOString();
+  const { error } = await supabase
+    .from('predictions')
+    .upsert(
+      {
+        user_id: user.id,
+        match_id: matchId,
+        home_score: homeScore,
+        away_score: awayScore,
+        updated_at: teraz,
+      },
+      { onConflict: 'user_id,match_id' },
+    );
+  if (error) return { error: error.message };
+
+  revalidatePath('/mecze');
+  // Zwracamy zapisany typ, żeby klient mógł od razu uaktualnić UI
+  // bez czekania na revalidatePath. Bug naprawiony: kiedy user typuje
+  // kolejno kilka meczów, defaultValue inputu pokazywało stary typ
+  // dopóki strona się nie odświeżyła. Teraz lokalny state w KartaMeczu
+  // bierze świeży typ z odpowiedzi Server Action.
+  return {
+    ok: 'Typ zapisany.',
+    typ: { home_score: homeScore, away_score: awayScore },
+    // Unikalny per wywołanie - klient używa go jako klucza React,
+    // żeby flash "zapisano" replayował się przy każdym kolejnym sukcesie.
+    // Bez tego key={state} stringifikował się do "[object Object]" i React
+    // utrzymywał ten sam DOM node - animacja odpalała się tylko raz.
+    savedAt: Date.now(),
+  };
+}
+
+// Pobiera cudze typy dla pojedynczego meczu - dla sekcji "Zobacz typy innych"
+// na karcie meczu (live/finished). Wywoływane lazy: dopiero po kliknięciu
+// przycisku, żeby nie wisieć z 50 zapytaniami na liście meczów.
+//
+// Bezpieczeństwo: warunek "kickoff_at <= now()" mamy w RLS i tu też dla
+// jasnego błędu po polsku. Cudze typy z meczów jeszcze nieobstawionych
+// pozostają ukryte (mecze nadchodzące - cudze typy MUSZĄ POZOSTAĆ NIEWIDOCZNE).
+//
+// Zwraca: lista CUDZYCH typów (własny typ usera odfiltrowany - widzi go już
+// na karcie meczu, więc duplikowanie myli i zaśmieca listę).
+//   { ok: true, typy: [{ nick, home, away, points }] }  (sortowane malejąco po points)
+//   { error: '...' }
+const SchematCudzychTypow = z.object({
+  matchId: z.coerce.number().int().positive(),
+});
+
+export async function pobierzCudzeTypy(args) {
+  const parsed = SchematCudzychTypow.safeParse(args);
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { matchId } = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: 'Brak sesji - zaloguj się ponownie.' };
+
+  // Defense in depth: RLS już to zablokuje, ale dla jasnego komunikatu po
+  // polsku weryfikujemy kickoff_at po stronie serwera.
+  const { data: mecz, error: meczE } = await supabase
+    .from('matches')
+    .select('id, kickoff_at')
+    .eq('id', matchId)
+    .single();
+  if (meczE || !mecz) return { error: 'Mecz nie istnieje.' };
+  if (new Date(mecz.kickoff_at) > new Date()) {
+    return { error: 'Cudze typy zobaczysz dopiero po rozpoczęciu meczu.' };
+  }
+
+  // Dwa osobne zapytania zamiast JOIN-a: predictions.user_id i profiles.id
+  // oba wskazują na auth.users.id, ale Supabase nie zna tej relacji
+  // (brak FK predictions -> profiles), więc embed sypał błędem
+  // "Could not find a relationship between 'predictions' and 'user_id'".
+  // Mergujemy po stronie JS - jeden round-trip więcej, ale działa.
+  const { data: predictions, error: predE } = await supabase
+    .from('predictions')
+    .select('user_id, home_score, away_score, points')
+    .eq('match_id', matchId);
+  if (predE) return { error: predE.message };
+  if (!predictions || predictions.length === 0) {
+    return { ok: true, typy: [] };
+  }
+
+  const userIds = predictions.map((p) => p.user_id);
+  const { data: profiles, error: profE } = await supabase
+    .from('profiles')
+    .select('id, nick')
+    .in('id', userIds);
+  if (profE) return { error: profE.message };
+
+  const nickMap = new Map();
+  for (const p of profiles || []) {
+    nickMap.set(p.id, p.nick);
+  }
+
+  // Sort: malejąco po points (NULL na koniec - jeszcze nierozliczone).
+  // Filtrujemy własny typ usera - na karcie meczu jest osobno ("Twój typ"),
+  // więc duplikowanie go w liście "cudzych typów" zaśmieca i myli.
+  const lista = predictions
+    .filter((p) => p.user_id !== user.id)
+    .map((p) => ({
+      userId: p.user_id,
+      nick: nickMap.get(p.user_id) || 'Anonim',
+      home: p.home_score,
+      away: p.away_score,
+      points: p.points ?? null,
+    }))
+    .sort((a, b) => {
+      const ap = a.points ?? -1;
+      const bp = b.points ?? -1;
+      if (ap !== bp) return bp - ap;
+      return a.nick.localeCompare(b.nick, 'pl');
+    });
+
+  return { ok: true, typy: lista };
+}
+
+// Paginacja sekcji "Nadchodzące" i "Zakończone".
+// kategoria:
+//   - 'nadchodzace' (kickoff od jutra 00:00 PL, status='scheduled', sort ASC)
+//   - 'zakonczone'  (status='finished', sort DESC po kickoff_at)
+// offset/limit jak w SQL - prosty LIMIT/OFFSET na ułożonej liście.
+//
+// Zwraca: { ok: true, mecze: [...], typy: [...] } albo { error: '...' }.
+// Max 50 wierszy na request - przy >100 nadchodzących meczach jednorazowe
+// załadowanie reszty wybijało walidację. Klient dociąga porcjami po LIMIT_PORCJI.
+const SchematWiecej = z.object({
+  kategoria: z.enum(['nadchodzace', 'zakonczone']),
+  offset: z.coerce.number().int().min(0),
+  limit: z.coerce.number().int().min(1).max(50),
+});
+
+export async function pobierzWiecejMeczow(args) {
+  const parsed = SchematWiecej.safeParse(args);
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { kategoria, offset, limit } = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: 'Brak sesji - zaloguj się ponownie.' };
+
+  // Sekcja "zakończone" zawiera też mecze "sierote" (kickoff > 3h temu bez wyniku),
+  // więc nie da się ich filtrować jednym .eq('status',...). Pobieramy całą listę
+  // i klasyfikujemy w JS - identycznie jak na /mecze.
+  const { data: wszystkie, error } = await supabase
+    .from('matches')
+    .select(
+      `
+        id, kickoff_at, status, home_score, away_score,
+        home_team_id, away_team_id, competition_code, group_name,
+        home_team:home_team_id ( id, name ),
+        away_team:away_team_id ( id, name )
+      `,
+    )
+    .order('kickoff_at', { ascending: true });
+  if (error) return { error: error.message };
+
+  const grupy = klasyfikujMecze(wszystkie || []);
+  const lista = kategoria === 'nadchodzace' ? grupy.nadchodzace : grupy.zakonczone;
+  const wycinek = lista.slice(offset, offset + limit);
+
+  // Pobierz typy usera dla tej porcji.
+  const ids = wycinek.map((m) => m.id);
+  let typy = [];
+  if (ids.length > 0) {
+    const { data, error: typyE } = await supabase
+      .from('predictions')
+      .select('match_id, home_score, away_score, points')
+      .eq('user_id', user.id)
+      .in('match_id', ids);
+    if (typyE) return { error: typyE.message };
+    typy = data || [];
+  }
+
+  return {
+    ok: true,
+    mecze: wycinek,
+    typy,
+    total: lista.length,
+  };
+}
