@@ -20,7 +20,10 @@ export default async function EdycjaPytaniaPage({ params }) {
 
   const [pytanieRes, druzynyRes, odpRes] = await Promise.all([
     supabase.from('bonus_questions').select('*').eq('id', id).single(),
-    supabase.from('teams').select('id, name').order('name'),
+    supabase
+      .from('teams')
+      .select('id, name, group_in_tournament')
+      .order('name'),
     supabase
       .from('bonus_answers')
       .select('id', { count: 'exact', head: true })

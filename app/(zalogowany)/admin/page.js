@@ -54,6 +54,11 @@ export default async function AdminPage() {
           tytul="📥 Import meczów"
           opis="Pobierz harmonogram z Football-Data.org. Wymaga zmapowanych drużyn."
         />
+        <Kafelek
+          href="/admin/zaproszenia"
+          tytul="🎟️ Kody zaproszeń"
+          opis="Generuj kody, bez których nikt nie założy konta. Podgląd użyć i historia."
+        />
       </div>
     </main>
   );

@@ -25,10 +25,13 @@ export default async function BonusyPage() {
       supabase
         .from('bonus_questions')
         .select(
-          'id, text, description, question_type, max_points, order_index, is_settled, correct_team_id, correct_boolean, correct_answer',
+          'id, text, description, question_type, max_points, order_index, is_settled, correct_team_id, correct_boolean, correct_answer, team_group',
         )
         .order('order_index', { ascending: true }),
-      supabase.from('teams').select('id, name').order('name', { ascending: true }),
+      supabase
+        .from('teams')
+        .select('id, name, group_in_tournament')
+        .order('name', { ascending: true }),
       supabase
         .from('bonus_answers')
         .select('id, question_id, answer_team_id, answer_boolean, answer_text, points')

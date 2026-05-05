@@ -226,7 +226,10 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) 
         <Meta kickoff={mecz.kickoff_at} grupaEtykieta={grupaEtykieta} live={false} />
 
         <div className="order-3 flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
-          <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base">
+          <span
+            title={home}
+            className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base"
+          >
             {home}
           </span>
           <div className="flex shrink-0 items-center gap-1">
@@ -258,7 +261,10 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) 
               aria-label={`Typ ${away}`}
             />
           </div>
-          <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base">
+          <span
+            title={away}
+            className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base"
+          >
             {away}
           </span>
         </div>
@@ -346,7 +352,10 @@ function RzadGotowy({
       <Meta kickoff={mecz.kickoff_at} grupaEtykieta={grupaEtykieta} live={live} />
 
       <div className="order-3 flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
-        <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base">
+        <span
+          title={home}
+          className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base"
+        >
           {home}
         </span>
         {maWynik ? (
@@ -367,7 +376,10 @@ function RzadGotowy({
             ⚠️ brak wyniku
           </span>
         )}
-        <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base">
+        <span
+          title={away}
+          className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base"
+        >
           {away}
         </span>
       </div>

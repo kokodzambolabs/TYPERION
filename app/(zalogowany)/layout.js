@@ -6,9 +6,9 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
-import { wyloguj } from '@/app/akcje/auth';
-import Button from '@/components/Button';
 import BannerBonusow from '@/components/BannerBonusow';
+import MenuProfilowe from '@/components/MenuProfilowe';
+import ModalRegulaminu from '@/components/ModalRegulaminu';
 
 export default async function ZalogowanyLayout({ children }) {
   const supabase = await createClient();
@@ -23,9 +23,10 @@ export default async function ZalogowanyLayout({ children }) {
   }
 
   // Pobieramy nick i flagę admina, żeby wiedzieć czy pokazać link "Admin".
+  // regulamin_zaakceptowany decyduje czy pokazać modal regulaminu.
   const { data: profil } = await supabase
     .from('profiles')
-    .select('nick, is_admin')
+    .select('nick, is_admin, regulamin_zaakceptowany')
     .eq('id', user.id)
     .single();
 
@@ -52,11 +53,14 @@ export default async function ZalogowanyLayout({ children }) {
     brakujace = Math.max(0, (liczbaPytan ?? 0) - (odpowiedzi?.length ?? 0));
   }
 
+  const pokazRegulamin = !profil?.regulamin_zaakceptowany;
+
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <Navbar nick={profil?.nick} isAdmin={!!profil?.is_admin} />
       <BannerBonusow closeAt={closeAt} brakujace={brakujace} />
       <div className="flex flex-1 flex-col">{children}</div>
+      {pokazRegulamin && <ModalRegulaminu />}
     </div>
   );
 }
@@ -72,14 +76,9 @@ function Navbar({ nick, isAdmin }) {
           <NavLink href="/mecze">Mecze</NavLink>
           <NavLink href="/bonusy">Bonusy</NavLink>
           <NavLink href="/ranking">Ranking</NavLink>
-          <NavLink href="/profil">Profil{nick ? ` (${nick})` : ''}</NavLink>
           {isAdmin && <NavLink href="/admin">Admin</NavLink>}
         </div>
-        <form action={wyloguj}>
-          <Button type="submit" variant="ghost">
-            Wyloguj się
-          </Button>
-        </form>
+        <MenuProfilowe nick={nick} />
       </nav>
     </header>
   );

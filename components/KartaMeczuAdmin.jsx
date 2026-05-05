@@ -48,7 +48,10 @@ export default function KartaMeczuAdmin({ mecz, poKickoff = false, sierota = fal
 
         {/* Centrum: drużyny + wynik */}
         <div className="order-3 flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
-          <span className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base">
+          <span
+            title={home}
+            className="min-w-0 flex-1 truncate text-right text-sm font-semibold text-emerald-50 sm:text-base"
+          >
             {home}
           </span>
           {maWynik ? (
@@ -65,7 +68,10 @@ export default function KartaMeczuAdmin({ mecz, poKickoff = false, sierota = fal
           ) : (
             <span className="shrink-0 px-1 text-emerald-300/50">vs</span>
           )}
-          <span className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base">
+          <span
+            title={away}
+            className="min-w-0 flex-1 truncate text-left text-sm font-semibold text-emerald-50 sm:text-base"
+          >
             {away}
           </span>
         </div>

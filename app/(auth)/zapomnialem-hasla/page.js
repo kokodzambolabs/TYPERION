@@ -3,14 +3,20 @@
 // Formularz "Zapomniałem hasła". Wpisujemy e-mail, Server Action wysyła
 // link resetujący przez Supabase. Po sukcesie pokazujemy komunikat zamiast
 // formularza - link niezależnie od tego, czy e-mail istnieje w bazie.
+//
+// Turnstile - boty często skanują reset hasła, więc zabezpieczamy.
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { wyslijLinkResetuHasla } from '@/app/akcje/auth';
 import Button from '@/components/Button';
+import TurnstileWidget from '@/components/TurnstileWidget';
 
 export default function ZapomnialemHaslaPage() {
   const [stan, akcja, pending] = useActionState(wyslijLinkResetuHasla, null);
+  const [token, setToken] = useState(null);
+  const turnstileWlaczony = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY);
+  const submitWylaczony = pending || (turnstileWlaczony && !token);
 
   return (
     <div className="rounded-2xl border border-emerald-900/50 bg-emerald-900/30 p-8 shadow-xl backdrop-blur">
@@ -34,13 +40,15 @@ export default function ZapomnialemHaslaPage() {
             placeholder="ty@przyklad.pl"
           />
 
+          <TurnstileWidget onToken={setToken} />
+
           {stan?.error && (
             <p className="rounded-md border border-red-500/40 bg-red-950/50 px-3 py-2 text-sm text-red-200">
               {stan.error}
             </p>
           )}
 
-          <Button type="submit" disabled={pending} className="w-full">
+          <Button type="submit" disabled={submitWylaczony} className="w-full">
             {pending ? 'Wysyłam…' : 'Wyślij link do resetu'}
           </Button>
         </form>

@@ -3,7 +3,7 @@
 //   2) 🔴 Trwające teraz - patrz lib/klasyfikacjaMeczow (okno 3h od kickoffu)
 //   3) 📅 Dzisiaj - status='scheduled' AND kickoff_at jest dziś (PL) AND > now()
 //   4) 🌅 Jutro - status='scheduled' AND kickoff_at jest jutro (PL); bez paginacji
-//   5) ⏭️ Nadchodzące - status='scheduled' AND data PL >= pojutrze - paginacja 10 + reszta
+//   5) ⏭️ Nadchodzące - status='scheduled' AND data PL >= pojutrze - paginacja 6 + reszta
 //   6) ✅ Zakończone - finished LUB "sierota" (kickoff > 3h temu bez wyniku);
 //      paginacja 5 + dociąganie po 10
 //
@@ -18,7 +18,7 @@ import KartaMeczu from '@/components/KartaMeczu';
 import SekcjaMeczow from '@/components/SekcjaMeczow';
 import { klasyfikujMecze } from '@/lib/klasyfikacjaMeczow';
 
-const POCZATKOWE_NADCHODZACE = 10;
+const POCZATKOWE_NADCHODZACE = 6;
 const POCZATKOWE_ZAKONCZONE = 5;
 
 export default async function MeczePage() {

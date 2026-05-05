@@ -35,7 +35,12 @@ export default function FormularzPoprawnejOdp({
               className="w-full rounded-lg border border-emerald-800/60 bg-emerald-950/50 px-3 py-2 text-emerald-50 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/40"
             >
               <option value="">Wybierz…</option>
-              {druzyny.map((d) => (
+              {(pytanie.team_group
+                ? druzyny.filter(
+                    (d) => d.group_in_tournament === pytanie.team_group,
+                  )
+                : druzyny
+              ).map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
                 </option>

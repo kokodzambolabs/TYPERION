@@ -26,6 +26,16 @@ export default function Home() {
             </Button>
           </Link>
         </div>
+        <div className="mt-12 flex flex-col items-center gap-4">
+          <img
+            src="/logo.png"
+            alt="KokoDzambo Labs"
+            className="w-64 h-auto sm:w-72"
+          />
+          <p className="text-sm text-emerald-200/70">
+            kokodzambolabs@gmail.com
+          </p>
+        </div>
       </div>
     </main>
   );

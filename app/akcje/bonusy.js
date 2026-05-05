@@ -10,28 +10,48 @@ import { sprawdzAdmina } from '@/lib/admin';
 import { createClient } from '@/lib/supabase/server';
 
 const TYPY = ['team', 'boolean', 'text', 'number'];
+// MŚ 2026 — 48 drużyn w 12 grupach (A–L), nie 8 jak w starszych edycjach.
+const GRUPY_MS = [
+  'GROUP_A', 'GROUP_B', 'GROUP_C', 'GROUP_D',
+  'GROUP_E', 'GROUP_F', 'GROUP_G', 'GROUP_H',
+  'GROUP_I', 'GROUP_J', 'GROUP_K', 'GROUP_L',
+];
 
-const SchematPytania = z.object({
-  text: z
-    .string()
-    .trim()
-    .min(3, { message: 'Pytanie musi mieć minimum 3 znaki.' })
-    .max(500, { message: 'Pytanie max 500 znaków.' }),
-  description: z
-    .string()
-    .trim()
-    .max(1000)
-    .nullable()
-    .optional()
-    .transform((v) => (v && v.length > 0 ? v : null)),
-  question_type: z.enum(TYPY, { message: 'Nieprawidłowy typ pytania.' }),
-  max_points: z.coerce
-    .number()
-    .int()
-    .min(1, { message: 'Punkty muszą być min. 1.' })
-    .max(1000, { message: 'Punkty max 1000.' }),
-  order_index: z.coerce.number().int().min(0).default(0),
-});
+const SchematPytania = z
+  .object({
+    text: z
+      .string()
+      .trim()
+      .min(3, { message: 'Pytanie musi mieć minimum 3 znaki.' })
+      .max(500, { message: 'Pytanie max 500 znaków.' }),
+    description: z
+      .string()
+      .trim()
+      .max(1000)
+      .nullable()
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null)),
+    question_type: z.enum(TYPY, { message: 'Nieprawidłowy typ pytania.' }),
+    max_points: z.coerce
+      .number()
+      .int()
+      .min(1, { message: 'Punkty muszą być min. 1.' })
+      .max(1000, { message: 'Punkty max 1000.' }),
+    order_index: z.coerce.number().int().min(0).default(0),
+    team_group: z
+      .string()
+      .nullable()
+      .optional()
+      .transform((v) => (v && v.length > 0 ? v : null))
+      .refine((v) => v === null || GRUPY_MS.includes(v), {
+        message: 'Nieprawidłowa grupa.',
+      }),
+  })
+  // team_group ma sens tylko dla pytań typu 'team' - dla innych typów
+  // wymuszamy null, żeby nie zostało po zmianie typu pytania.
+  .transform((v) =>
+    v.question_type === 'team' ? v : { ...v, team_group: null },
+  );
 
 function parsujPytanie(formData) {
   return SchematPytania.safeParse({
@@ -40,6 +60,7 @@ function parsujPytanie(formData) {
     question_type: formData.get('question_type'),
     max_points: formData.get('max_points'),
     order_index: formData.get('order_index') ?? 0,
+    team_group: formData.get('team_group') ?? null,
   });
 }
 
@@ -138,6 +159,22 @@ export async function zapiszPoprawnaOdpowiedz(id, _prev, formData) {
   };
   if (parsed.data.question_type === 'team') {
     if (!parsed.data.correct_team_id) return { error: 'Wybierz drużynę.' };
+    // Jeśli pytanie ma filtr grupy - sprawdź czy wybrana drużyna do niej należy.
+    const { data: pytanie } = await auth.supabase
+      .from('bonus_questions')
+      .select('team_group')
+      .eq('id', pytanieId)
+      .single();
+    if (pytanie?.team_group) {
+      const { data: team } = await auth.supabase
+        .from('teams')
+        .select('group_in_tournament')
+        .eq('id', parsed.data.correct_team_id)
+        .single();
+      if (!team || team.group_in_tournament !== pytanie.team_group) {
+        return { error: 'Wybrana drużyna nie należy do filtrowanej grupy.' };
+      }
+    }
     update.correct_team_id = parsed.data.correct_team_id;
   } else if (parsed.data.question_type === 'boolean') {
     if (parsed.data.correct_boolean === null) return { error: 'Wybierz Tak lub Nie.' };
@@ -278,7 +315,7 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
 
   const { data: pytanie, error: pytE } = await supabase
     .from('bonus_questions')
-    .select('id, question_type')
+    .select('id, question_type, team_group')
     .eq('id', parsed.data.questionId)
     .single();
   if (pytE || !pytanie) return { error: 'Pytanie nie istnieje.' };
@@ -304,6 +341,18 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
   };
   if (pytanie.question_type === 'team') {
     if (!parsed.data.answerTeamId) return { error: 'Wybierz drużynę.' };
+    // RLS nie egzekwuje team_group - musimy to sprawdzić sami,
+    // żeby user nie mógł obejść filtra przez własny POST.
+    if (pytanie.team_group) {
+      const { data: team } = await supabase
+        .from('teams')
+        .select('group_in_tournament')
+        .eq('id', parsed.data.answerTeamId)
+        .single();
+      if (!team || team.group_in_tournament !== pytanie.team_group) {
+        return { error: 'Wybrana drużyna nie należy do filtrowanej grupy.' };
+      }
+    }
     wpis.answer_team_id = parsed.data.answerTeamId;
   } else if (pytanie.question_type === 'boolean') {
     if (parsed.data.answerBoolean === null) return { error: 'Wybierz Tak lub Nie.' };
@@ -325,7 +374,9 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
   if (error) return { error: error.message };
 
   revalidatePath('/bonusy');
-  return { ok: 'Zapisano.' };
+  // savedAt jako klucz do flash animacji - bez tego key={state} nie zmienia się
+  // między kolejnymi udanymi zapisami i animacja odpala się tylko raz.
+  return { ok: 'Zapisano.', savedAt: Date.now() };
 }
 
 export async function oznaczPytanieRozliczone(id) {

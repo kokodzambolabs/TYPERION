@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/server';
 import { przetlumaczNaPolski } from '@/lib/translateTeams';
+import { formatGrupa } from '@/lib/format';
 import Button from '@/components/Button';
 import PrzyciskUsun from '@/components/PrzyciskUsun';
+import PrzyciskPrzypiszGrupy from '@/components/PrzyciskPrzypiszGrupy';
 import { usunDruzyne } from '@/app/akcje/druzyny';
 
 export default async function DruzynyPage({ searchParams }) {
@@ -14,7 +16,7 @@ export default async function DruzynyPage({ searchParams }) {
   const supabase = await createClient();
   const { data: druzyny, error } = await supabase
     .from('teams')
-    .select('id, name')
+    .select('id, name, group_in_tournament')
     .order('name', { ascending: true });
 
   // Czy są drużyny których nazwa to wartość angielska ze słownika?
@@ -37,6 +39,7 @@ export default async function DruzynyPage({ searchParams }) {
           <Link href="/admin/druzyny/mapowanie">
             <Button variant="secondary">🔗 Mapuj drużyny do API</Button>
           </Link>
+          <PrzyciskPrzypiszGrupy />
           <Link href="/admin/druzyny/nowa">
             <Button variant="primary">+ Dodaj drużynę</Button>
           </Link>
@@ -61,26 +64,36 @@ export default async function DruzynyPage({ searchParams }) {
         </div>
       ) : (
         <ul className="space-y-2">
-          {druzyny.map((d) => (
-            <li
-              key={d.id}
-              className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-900/40 bg-emerald-900/20 px-4 py-3"
-            >
-              <div className="font-semibold text-emerald-50">{d.name}</div>
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/admin/druzyny/${d.id}/edycja`}
-                  className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-sm text-emerald-100 transition hover:bg-emerald-500/10"
-                >
-                  Edytuj
-                </Link>
-                <PrzyciskUsun
-                  akcja={usunDruzyne.bind(null, d.id)}
-                  etykieta={`Usunąć drużynę "${d.name}"?`}
-                />
-              </div>
-            </li>
-          ))}
+          {druzyny.map((d) => {
+            const grupaEtykieta = formatGrupa(d.group_in_tournament);
+            return (
+              <li
+                key={d.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-900/40 bg-emerald-900/20 px-4 py-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-emerald-50">{d.name}</span>
+                  {grupaEtykieta && (
+                    <span className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-200">
+                      {grupaEtykieta}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Link
+                    href={`/admin/druzyny/${d.id}/edycja`}
+                    className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-sm text-emerald-100 transition hover:bg-emerald-500/10"
+                  >
+                    Edytuj
+                  </Link>
+                  <PrzyciskUsun
+                    akcja={usunDruzyne.bind(null, d.id)}
+                    etykieta={`Usunąć drużynę "${d.name}"?`}
+                  />
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </main>

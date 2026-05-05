@@ -257,3 +257,74 @@ export async function zastosujTlumaczenia(translations) {
 
   return { success: true, translated, skipped, errors };
 }
+
+// ---------------------------------------------------------------------
+// Przypisanie drużyn do grup turniejowych (MŚ).
+// Czyta matches.group_name dla competition_code='WC' i ustawia
+// teams.group_in_tournament dla każdej drużyny występującej w meczu
+// fazy grupowej (group_name LIKE 'GROUP_%'). Drużyny które grały w
+// kilku grupach (nie powinno się zdarzyć) dostają grupę z ostatniego
+// przetworzonego meczu - ale w MŚ to niemożliwe.
+//
+// Zwraca: { success, updated } - liczba drużyn którym faktycznie
+// zmieniliśmy/ustawiliśmy group_in_tournament.
+// ---------------------------------------------------------------------
+export async function aktualizujGrupyDruzyn() {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return { success: false, error: auth.error };
+
+  const { data: mecze, error: meczeE } = await auth.supabase
+    .from('matches')
+    .select('home_team_id, away_team_id, group_name')
+    .eq('competition_code', 'WC')
+    .like('group_name', 'GROUP_%');
+  if (meczeE) {
+    return { success: false, error: `Nie udało się pobrać meczów: ${meczeE.message}` };
+  }
+
+  // teamId -> group_name. Każdy mecz dorzuca obie drużyny.
+  const grupaPoTeamId = new Map();
+  for (const m of mecze || []) {
+    if (!m.group_name) continue;
+    if (m.home_team_id) grupaPoTeamId.set(m.home_team_id, m.group_name);
+    if (m.away_team_id) grupaPoTeamId.set(m.away_team_id, m.group_name);
+  }
+
+  if (grupaPoTeamId.size === 0) {
+    return { success: true, updated: 0 };
+  }
+
+  // Aktualne wartości - pomijamy drużyny które już mają poprawnie ustawioną grupę.
+  const teamIds = Array.from(grupaPoTeamId.keys());
+  const { data: aktualne, error: aktE } = await auth.supabase
+    .from('teams')
+    .select('id, group_in_tournament')
+    .in('id', teamIds);
+  if (aktE) {
+    return { success: false, error: `Nie udało się pobrać drużyn: ${aktE.message}` };
+  }
+
+  const aktualnaGrupa = new Map();
+  for (const t of aktualne || []) aktualnaGrupa.set(t.id, t.group_in_tournament);
+
+  let updated = 0;
+  for (const [teamId, groupName] of grupaPoTeamId) {
+    if (aktualnaGrupa.get(teamId) === groupName) continue;
+    const { error: updE } = await auth.supabase
+      .from('teams')
+      .update({ group_in_tournament: groupName })
+      .eq('id', teamId);
+    if (updE) {
+      return { success: false, error: `Drużyna #${teamId}: ${updE.message}` };
+    }
+    updated++;
+  }
+
+  if (updated > 0) {
+    revalidatePath('/admin/druzyny');
+    revalidatePath('/admin/bonusy');
+    revalidatePath('/bonusy');
+  }
+
+  return { success: true, updated };
+}
