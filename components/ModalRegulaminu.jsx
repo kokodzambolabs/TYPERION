@@ -34,7 +34,7 @@ export default function ModalRegulaminu() {
 
         <div className="my-12 text-center">
           <p className="text-2xl font-semibold leading-relaxed text-emerald-100">
-            1. Administrator ma zawsze racej i Pawel z adwokatem Norkiem japa cicho
+            Administrator ma zawsze racje.
           </p>
         </div>
 
