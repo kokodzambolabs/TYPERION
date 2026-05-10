@@ -141,13 +141,13 @@ export async function pobierzCudzeTypy(args) {
   const userIds = predictions.map((p) => p.user_id);
   const { data: profiles, error: profE } = await supabase
     .from('profiles')
-    .select('id, nick')
+    .select('id, nick, is_bot')
     .in('id', userIds);
   if (profE) return { error: profE.message };
 
-  const nickMap = new Map();
+  const profilMap = new Map();
   for (const p of profiles || []) {
-    nickMap.set(p.id, p.nick);
+    profilMap.set(p.id, p);
   }
 
   // Sort: malejąco po points (NULL na koniec - jeszcze nierozliczone).
@@ -155,13 +155,17 @@ export async function pobierzCudzeTypy(args) {
   // więc duplikowanie go w liście "cudzych typów" zaśmieca i myli.
   const lista = predictions
     .filter((p) => p.user_id !== user.id)
-    .map((p) => ({
-      userId: p.user_id,
-      nick: nickMap.get(p.user_id) || 'Anonim',
-      home: p.home_score,
-      away: p.away_score,
-      points: p.points ?? null,
-    }))
+    .map((p) => {
+      const prof = profilMap.get(p.user_id);
+      return {
+        userId: p.user_id,
+        nick: prof?.nick || 'Anonim',
+        isBot: !!prof?.is_bot,
+        home: p.home_score,
+        away: p.away_score,
+        points: p.points ?? null,
+      };
+    })
     .sort((a, b) => {
       const ap = a.points ?? -1;
       const bp = b.points ?? -1;

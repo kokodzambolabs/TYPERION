@@ -59,6 +59,11 @@ export default async function AdminPage() {
           tytul="🎟️ Kody zaproszeń"
           opis="Generuj kody, bez których nikt nie założy konta. Podgląd użyć i historia."
         />
+        <Kafelek
+          href="/admin/boty-ai"
+          tytul="🤖 Boty AI"
+          opis="Konta AI typujące mecze (Claude, Gemini). Generowanie ręczne i podgląd kosztów."
+        />
       </div>
     </main>
   );

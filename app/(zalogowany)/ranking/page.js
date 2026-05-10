@@ -21,7 +21,7 @@ export default async function RankingPage() {
   if (!user) redirect('/logowanie');
 
   const [{ data: profile }, { data: bonusy }, { data: mecze }] = await Promise.all([
-    supabase.from('profiles').select('id, nick'),
+    supabase.from('profiles').select('id, nick, is_bot'),
     supabase.from('bonus_answers').select('user_id, points'),
     supabase.from('predictions').select('user_id, points'),
   ]);
@@ -38,6 +38,8 @@ export default async function RankingPage() {
     sumaMecze.set(m.user_id, (sumaMecze.get(m.user_id) || 0) + m.points);
   }
 
+  // Sortujemy tu, ale POZYCJĘ wylicza już TabelaRankingu (client) - po
+  // ewentualnym odfiltrowaniu botów numeracja musi być ciągła.
   const wiersze = (profile || [])
     .map((p) => {
       const bonus_points = sumaBonus.get(p.id) || 0;
@@ -45,6 +47,7 @@ export default async function RankingPage() {
       return {
         user_id: p.id,
         nick: p.nick,
+        is_bot: !!p.is_bot,
         bonus_points,
         match_points,
         total_points: bonus_points + match_points,
@@ -53,8 +56,7 @@ export default async function RankingPage() {
     .sort((a, b) => {
       if (b.total_points !== a.total_points) return b.total_points - a.total_points;
       return b.match_points - a.match_points;
-    })
-    .map((w, i) => ({ ...w, pozycja: i + 1 }));
+    });
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-10">
