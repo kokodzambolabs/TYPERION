@@ -1,30 +1,39 @@
 // API Route - cron typujący mecze przez boty AI.
 // Wywoływany zewnętrznie (np. cron-job.org) co godzinę. Bierze mecze
-// startujące za 60-90 min i odpala każdego AKTYWNEGO bota na każdym z nich.
-// Boty, które już typowały dany mecz, są pomijane (idempotentne).
+// startujące w oknie 0-120 min i dla każdej pary aktywny_bot × mecz
+// (gdzie bot jeszcze nie typował) wysyła osobne POST do endpointa
+// /api/generuj-typ-pojedynczy w trybie fire-and-forget. Sam cron ma
+// więc tylko zlecić zadania - nie czeka aż boty skończą.
 //
 // Autoryzacja: nagłówek Authorization: Bearer ${CRON_SECRET} (ten sam
 // sekret co cron aktualizacji wyników).
 //
-// Całą logikę dzielimy z Server Action wymusGenerowanieBotow() przez
-// lib/ai-typer/cronBotow.js - tu zostaje tylko autoryzacja i init klienta.
+// maxDuration=60 wystarcza, bo cron tylko zleca - prawdziwe typowanie
+// dzieje się w endpointcie pojedynczego typu (każdy z własnym 300s budżetem).
 
 import { utworzKlientaServiceRole } from '@/lib/supabase/admin';
 import { uruchomCronBotow } from '@/lib/ai-typer/cronBotow';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 export async function GET(request) {
   const oczekiwany = process.env.CRON_SECRET;
   if (!oczekiwany) {
     console.error('[cron-boty] brak CRON_SECRET w env - cron zablokowany');
-    return Response.json({ ok: false, error: 'Brak CRON_SECRET w env.' }, { status: 500 });
+    return Response.json(
+      { ok: false, error: 'Brak CRON_SECRET w env.' },
+      { status: 500 },
+    );
   }
 
   const authHeader = request.headers.get('authorization');
   if (authHeader !== `Bearer ${oczekiwany}`) {
     console.warn('[cron-boty] nieautoryzowane wywołanie /api/cron/boty-ai');
-    return Response.json({ ok: false, error: 'Brak autoryzacji.' }, { status: 401 });
+    return Response.json(
+      { ok: false, error: 'Brak autoryzacji.' },
+      { status: 401 },
+    );
   }
 
   let sb;
@@ -38,13 +47,23 @@ export async function GET(request) {
     );
   }
 
+  // Self-callback do /api/generuj-typ-pojedynczy potrzebuje absolutnego URL.
+  // Na Vercel host przychodzi przez x-forwarded-host, schemat przez x-forwarded-proto.
+  const host =
+    request.headers.get('x-forwarded-host') || request.headers.get('host');
+  const proto =
+    request.headers.get('x-forwarded-proto') ||
+    (host?.includes('localhost') ? 'http' : 'https');
+  const baseUrl = `${proto}://${host}`;
+
   const start = Date.now();
-  const wynik = await uruchomCronBotow(sb);
+  const wynik = await uruchomCronBotow(sb, { baseUrl });
   const ms = Date.now() - start;
 
   console.log(
-    `[cron-boty] zakończone w ${ms}ms - processed=${wynik.processed ?? 0}, ` +
-      `errors=${wynik.errors ?? 0}, skipped=${wynik.skipped ?? 0}`,
+    `[cron-boty] zakończone w ${ms}ms - zlecone=${wynik.zlecone ?? 0}, ` +
+      `skipped=${wynik.skipped ?? 0}, mecze=${wynik.total_matches ?? 0}, ` +
+      `boty=${wynik.total_bots ?? 0}`,
   );
 
   if (!wynik.ok) {

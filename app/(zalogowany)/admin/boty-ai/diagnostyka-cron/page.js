@@ -1,7 +1,7 @@
 // Diagnostyka cron-a botów AI (/admin/boty-ai/diagnostyka-cron).
 // Server Component - pokazuje:
 //   - kiedy boty ostatnio coś typowały (max created_at z ai_typing_logs),
-//   - listę meczów w oknie cron-a (60-90 min) i które boty już je otypowały,
+//   - listę meczów w oknie cron-a (0-120 min) i które boty już je otypowały,
 //   - przycisk "🚀 Wymuś teraz" (Server Action wymusGenerowanieBotow).
 // Wszystko ciągniemy service_role-em - inaczej RLS chowa typy botów na
 // nadchodzące mecze i statusy są mylące.
@@ -79,8 +79,9 @@ export default async function DiagnostykaCronPage() {
           </h1>
           <p className="mt-1 text-sm text-emerald-200/70">
             Cron <code className="rounded bg-emerald-900/60 px-1">/api/cron/boty-ai</code>{' '}
-            (co godzinę, zewnętrznie) typuje mecze startujące za{' '}
-            {OKNO_OD_MIN}–{OKNO_DO_MIN} min wszystkimi aktywnymi botami.
+            (co godzinę, zewnętrznie) zleca typowanie wszystkich nadchodzących
+            meczów w oknie {OKNO_OD_MIN}–{OKNO_DO_MIN} min wszystkim aktywnym
+            botom (fire-and-forget - każdy bot pracuje w tle).
           </p>
         </div>
         <Link href="/admin/boty-ai">
@@ -149,7 +150,7 @@ export default async function DiagnostykaCronPage() {
         </h2>
         {meczeZMeta.length === 0 ? (
           <p className="text-sm text-emerald-300/70">
-            Brak meczów startujących za {OKNO_OD_MIN}–{OKNO_DO_MIN} min.
+            Brak meczów startujących w oknie {OKNO_OD_MIN}–{OKNO_DO_MIN} min.
             Cron przy najbliższym wywołaniu nic nie zrobi.
           </p>
         ) : (

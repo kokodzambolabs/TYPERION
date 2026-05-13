@@ -4,11 +4,11 @@
 //   - filtry (kompetycja, data od-do, fraza),
 //   - lista nadchodzących meczów z checkboxami,
 //   - przycisk "Wygeneruj typy dla zaznaczonych" → wygenerujTypyMasowo,
-//   - postęp i podsumowanie kosztu.
+//   - komunikat o zleceniu zadań w tle (fire-and-forget).
 //
-// useTransition trzyma "pending" - na czas wywołania blokujemy formularz.
-// Wynik to lista { bot, matchId, ok|error, home, away, cost } - renderujemy
-// jako log na dole, plus suma kosztu.
+// useTransition trzyma "pending" - akcja wraca w <1s (tylko zleca zadania),
+// więc spinner i tak nie zdąży się pojawić. Wynik to liczba zleconych zadań -
+// faktyczne typy widać w /admin/boty-ai/logi po 2-3 min.
 
 import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
@@ -237,10 +237,7 @@ export default function PanelGenerowania({
 
         {pending && (
           <p className="mt-3 rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
-            ⏳ Generuję typy… To może chwilę potrwać. Gemini przy
-            przeciążeniu ponawia próbę do 5 razy z odczekaniem (5s → 15s →
-            30s → 60s → 120s, łącznie do ~230s na jedno wywołanie) —
-            cierpliwości, postęp pojawi się tutaj po zakończeniu.
+            ⏳ Zlecam zadania…
           </p>
         )}
 
@@ -271,43 +268,31 @@ function PodsumowanieGenerowania({ wynik }) {
       </div>
     );
   }
+  // Po refactorze na fire-and-forget Server Action wraca natychmiast z
+  // liczbą zleconych zadań, a nie faktycznymi typami. Wyniki ląduja
+  // w /admin/boty-ai/logi w miarę kończenia pracy botów.
   return (
     <section className="rounded-2xl border border-emerald-900/40 bg-emerald-900/20 p-5">
       <h2 className="mb-3 text-lg font-bold text-emerald-50">
-        Wynik generowania
+        ✅ Zadania zlecone
       </h2>
       <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <Stat label="Sukcesy" value={wynik.sukcesy ?? 0} kolor="emerald" />
-        <Stat label="Błędy" value={wynik.bledy ?? 0} kolor="red" />
-        <Stat
-          label="Łączny koszt"
-          value={`$${(wynik.lacznyKoszt ?? 0).toFixed(4)}`}
-          kolor="emerald"
-        />
+        <Stat label="Zlecone zadania" value={wynik.zlecone ?? 0} kolor="emerald" />
+        <Stat label="Aktywne boty" value={wynik.botow ?? 0} kolor="emerald" />
+        <Stat label="Mecze" value={wynik.meczow ?? 0} kolor="emerald" />
       </div>
-      <ol className="space-y-1 text-xs">
-        {(wynik.wyniki || []).map((w, i) => (
-          <li
-            key={i}
-            className={`rounded-md border px-3 py-1.5 ${
-              w.ok
-                ? 'border-emerald-700/40 bg-emerald-950/40 text-emerald-100'
-                : 'border-rose-700/40 bg-rose-950/30 text-rose-100'
-            }`}
-          >
-            {w.ok ? '✅' : '❌'} <strong>{w.bot}</strong> · mecz #
-            {w.matchId}
-            {w.ok ? (
-              <>
-                {' '}
-                — {w.home}:{w.away} (${(w.cost || 0).toFixed(4)})
-              </>
-            ) : (
-              <span className="ml-1 text-rose-200">— {w.error}</span>
-            )}
-          </li>
-        ))}
-      </ol>
+      <p className="rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
+        🤖 {wynik.info || `Zlecono ${wynik.zlecone} zadań typowania.`}
+        <br />
+        Każdy bot pracuje w tle (do ~5 min na typ). Odśwież{' '}
+        <Link
+          href="/admin/boty-ai/logi"
+          className="font-semibold underline hover:text-sky-50"
+        >
+          listę logów
+        </Link>{' '}
+        za 2-3 minuty, żeby zobaczyć wyniki.
+      </p>
     </section>
   );
 }

@@ -1,10 +1,12 @@
 'use client';
 
-// Przycisk "🚀 Wymuś teraz" - ręcznie odpala to, co robi cron botów AI
-// (Server Action wymusGenerowanieBotow). Pokazuje wynik: ile typów
-// wygenerowano, ile błędów, ile pominięto + listę.
+// Przycisk "🚀 Wymuś teraz" - ręcznie zleca to, co robi cron botów AI
+// (Server Action wymusGenerowanieBotow). Po refactorze na fire-and-forget
+// wynik pokazuje tylko liczbę zleconych zadań - faktyczne typy lądują
+// w /admin/boty-ai/logi w miarę kończenia pracy botów (do ~5 min/typ).
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 import Button from '@/components/Button';
 import { wymusGenerowanieBotow } from '@/app/akcje/ai-boty';
 
@@ -26,19 +28,18 @@ export default function PanelWymusCron() {
         <div>
           <h2 className="text-lg font-bold text-emerald-50">Wymuś teraz</h2>
           <p className="text-sm text-emerald-200/70">
-            Odpala boty na meczach z okna 60–90 min od teraz, bez czekania na
-            cron. Może chwilę potrwać (Gemini ponawia próby do ~230s).
+            Zleca boty na meczach z okna 0–120 min od teraz, bez czekania na
+            cron. Akcja wraca w &lt;1s - boty pracują w tle.
           </p>
         </div>
         <Button onClick={onClick} disabled={pending}>
-          {pending ? 'Generuję…' : '🚀 Wymuś teraz'}
+          {pending ? 'Zlecam…' : '🚀 Wymuś teraz'}
         </Button>
       </div>
 
       {pending && (
         <p className="mt-3 rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
-          ⏳ Trwa generowanie… Wynik pojawi się tutaj po zakończeniu wszystkich
-          wywołań.
+          ⏳ Zlecam zadania…
         </p>
       )}
 
@@ -64,38 +65,25 @@ function Wynik({ wynik }) {
         </p>
       )}
       <div className="grid grid-cols-3 gap-2 text-sm">
-        <Stat label="Wytypowano" value={wynik.processed ?? 0} kolor="emerald" />
-        <Stat label="Błędy" value={wynik.errors ?? 0} kolor="red" />
+        <Stat label="Zlecone" value={wynik.zlecone ?? 0} kolor="emerald" />
         <Stat label="Pominięto" value={wynik.skipped ?? 0} kolor="amber" />
+        <Stat
+          label="Mecze × boty"
+          value={`${wynik.total_matches ?? 0} × ${wynik.total_bots ?? 0}`}
+          kolor="emerald"
+        />
       </div>
-      {(wynik.results || []).length > 0 && (
-        <ol className="space-y-1 text-xs">
-          {wynik.results.map((r, i) => (
-            <li
-              key={i}
-              className={`rounded-md border px-3 py-1.5 ${
-                r.error
-                  ? 'border-rose-700/40 bg-rose-950/30 text-rose-100'
-                  : 'border-emerald-700/40 bg-emerald-950/40 text-emerald-100'
-              }`}
-            >
-              {r.error ? '❌' : '✅'} <strong>{r.bot}</strong> · {r.match}
-              {r.error ? (
-                <span className="ml-1 text-rose-200">— {r.error}</span>
-              ) : (
-                <>
-                  {' '}
-                  — {r.typ}
-                  {typeof r.cost === 'number' && (
-                    <span className="ml-1 text-emerald-300/70">
-                      (${r.cost.toFixed(4)})
-                    </span>
-                  )}
-                </>
-              )}
-            </li>
-          ))}
-        </ol>
+      {(wynik.zlecone ?? 0) > 0 && (
+        <p className="rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
+          🤖 Każde zadanie pracuje w tle (do ~5 min). Odśwież{' '}
+          <Link
+            href="/admin/boty-ai/logi"
+            className="font-semibold underline hover:text-sky-50"
+          >
+            listę logów
+          </Link>{' '}
+          za 2-3 minuty, żeby zobaczyć wyniki.
+        </p>
       )}
     </div>
   );

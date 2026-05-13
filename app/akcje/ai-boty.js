@@ -3,32 +3,27 @@
 // Server Actions dla AI botów typujących mecze.
 //
 //   wygenerujTypDlaMeczu(botUserId, matchId)
-//     - waliduje admina, wczytuje bota i mecz, sprawdza czy bot już
-//       nie typował, wywołuje AI, zapisuje typ do `predictions` (przez
-//       service_role - omija RLS), wkłada wpis do `ai_typing_logs`.
-//     - Błąd AI też ląduje w logu (kolumna `error`), żeby admin widział
-//       co poszło nie tak (timeout, niepoprawny JSON, błąd providera).
+//     - waliduje admina, wywołuje endpoint /api/generuj-typ-pojedynczy
+//       z await (1 wywołanie zwykle <60s), zwraca wynik do UI.
 //
 //   wygenerujTypyMasowo(matchIds)
-//     - dla wszystkich aktywnych botów × każdego z meczów.
-//     - sekwencyjnie (rate limity providerów) i odporne na błąd jednego
-//       wywołania - robi pełną pętlę i zwraca podsumowanie.
+//     - dla wszystkich aktywnych botów × każdego z meczów wysyła osobne
+//       żądanie POST do /api/generuj-typ-pojedynczy w trybie FIRE-AND-FORGET
+//       (fetch BEZ await). Każde takie żądanie ma własny 300s budget na
+//       Vercel. Server Action wraca natychmiast z listą zleconych zadań.
+//       Wyniki widać w /admin/boty-ai/logi po 2-3 min.
 //
 //   utworzBotaAI({ nick, email, ai_provider, ai_model, ai_prompt_type })
 //     - tworzy auth user przez Supabase Admin API i profile z is_bot=true.
 //
-// Zapis typu i logu robimy SERVICE_ROLE-em, bo:
-//   - typ wstawiamy w imieniu innego usera (bota) - RLS by zablokował
-//     userowi-adminowi wstawienie wiersza z user_id != auth.uid(),
-//   - logi mają polityki tylko SELECT dla admina (INSERT przez SR).
+// Endpoint generuje typy przez service_role (RLS by zablokował insert
+// w imieniu innego usera). Server Action nie dotyka już AI bezpośrednio.
 
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { createClient } from '@/lib/supabase/server';
 import { utworzKlientaServiceRole } from '@/lib/supabase/admin';
-import { generujTypAI } from '@/lib/ai-typer';
 import { uruchomCronBotow } from '@/lib/ai-typer/cronBotow';
-import { NAZWY_COMPETITIONS } from '@/lib/competitions';
-import { formatGrupa } from '@/lib/format';
 
 async function sprawdzAdminaWAkcji() {
   const supabase = await createClient();
@@ -48,102 +43,54 @@ async function sprawdzAdminaWAkcji() {
   return { user };
 }
 
-function buildMatchData(match) {
-  const grupa = formatGrupa(match.group_name);
-  return {
-    homeTeam: match.home_team?.name || `#${match.home_team_id}`,
-    awayTeam: match.away_team?.name || `#${match.away_team_id}`,
-    kickoffDate: new Date(match.kickoff_at).toLocaleString('pl-PL', {
-      timeZone: 'Europe/Warsaw',
-    }),
-    competitionName:
-      NAZWY_COMPETITIONS[match.competition_code] ||
-      match.competition_code ||
-      '',
-    groupInfo: grupa ? `Faza/Grupa: ${grupa}` : '',
-  };
+// Buduje absolutny baseUrl z nagłówków bieżącego żądania (Vercel + lokalnie).
+async function pobierzBaseUrl() {
+  const h = await headers();
+  const host = h.get('x-forwarded-host') || h.get('host');
+  const proto =
+    h.get('x-forwarded-proto') || (host?.includes('localhost') ? 'http' : 'https');
+  return `${proto}://${host}`;
 }
 
-// Wygeneruj typ dla pojedynczego meczu i bota.
-// Zwraca { ok, home, away, cost, ... } albo { error }.
+// Pojedyncze typowanie z UI (1 bot × 1 mecz). Czekamy na wynik - zazwyczaj
+// <60s, więc nie ma problemu z timeoutami Vercel. Pod spodem ten sam
+// endpoint, który napędza generowanie masowe i crona - jeden punkt prawdy.
 export async function wygenerujTypDlaMeczu(botUserId, matchId) {
   const auth = await sprawdzAdminaWAkcji();
   if (auth.error) return { error: auth.error };
 
-  const sb = utworzKlientaServiceRole();
-
-  const { data: bot, error: botE } = await sb
-    .from('profiles')
-    .select('id, nick, is_bot, bot_active, ai_provider, ai_model, ai_prompt_type')
-    .eq('id', botUserId)
-    .eq('is_bot', true)
-    .single();
-
-  if (botE || !bot) return { error: 'Bot nie istnieje.' };
-  if (!bot.bot_active) {
-    return { error: `Bot ${bot.nick} jest wyłączony.` };
+  if (!botUserId || !matchId) {
+    return { error: 'Wymagane: botUserId i matchId.' };
   }
-  if (!bot.ai_provider || !bot.ai_model) {
-    return { error: `Bot ${bot.nick} nie ma skonfigurowanego modelu AI.` };
+  if (!process.env.CRON_SECRET) {
+    return { error: 'Brak CRON_SECRET w env - skonfiguruj zmienną.' };
   }
 
-  const { data: match, error: matchE } = await sb
-    .from('matches')
-    .select(
-      `
-        id, kickoff_at, status, competition_code, group_name,
-        home_team_id, away_team_id,
-        home_team:home_team_id ( id, name ),
-        away_team:away_team_id ( id, name )
-      `,
-    )
-    .eq('id', matchId)
-    .single();
-
-  if (matchE || !match) return { error: 'Mecz nie istnieje.' };
-
-  // Po starcie meczu typowanie nie ma sensu - zostawiamy bot bez wpisu.
-  if (new Date(match.kickoff_at) <= new Date()) {
-    return { error: 'Mecz już się rozpoczął - nie typujemy.' };
-  }
-
-  const matchData = buildMatchData(match);
+  const baseUrl = await pobierzBaseUrl();
 
   try {
-    const aiResult = await generujTypAI(bot, matchData);
+    // AbortController na wypadek długiego AI - Server Action ma własny
+    // budżet (na Hobby 300s), nie chcemy wisieć w nieskończoność.
+    const ctrl = new AbortController();
+    const timeoutId = setTimeout(() => ctrl.abort(), 290 * 1000);
 
-    // UPSERT zamiast INSERT - admin może re-generować typ (np. testując
-    // różne prompty). Klucz: unique (user_id, match_id) z SUPABASE_SETUP.sql.
-    const { error: insertError } = await sb.from('predictions').upsert(
-      {
-        user_id: botUserId,
-        match_id: matchId,
-        home_score: aiResult.home,
-        away_score: aiResult.away,
-        updated_at: new Date().toISOString(),
+    const res = await fetch(`${baseUrl}/api/generuj-typ-pojedynczy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.CRON_SECRET}`,
       },
-      { onConflict: 'user_id,match_id' },
-    );
-
-    if (insertError) {
-      throw new Error(`Błąd zapisu typu: ${insertError.message}`);
-    }
-
-    await sb.from('ai_typing_logs').insert({
-      user_id: botUserId,
-      match_id: matchId,
-      ai_provider: bot.ai_provider,
-      ai_model: bot.ai_model,
-      prompt_type: bot.ai_prompt_type,
-      prompt_used: aiResult.promptUsed,
-      raw_response: aiResult.rawResponse,
-      parsed_home: aiResult.home,
-      parsed_away: aiResult.away,
-      uzasadnienie: null,
-      tokens_input: aiResult.tokensInput,
-      tokens_output: aiResult.tokensOutput,
-      cost_usd: aiResult.costUsd,
+      body: JSON.stringify({ botUserId, matchId }),
+      signal: ctrl.signal,
+      cache: 'no-store',
     });
+    clearTimeout(timeoutId);
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data.ok) {
+      return { error: data?.error || `HTTP ${res.status}` };
+    }
 
     revalidatePath('/admin/boty-ai');
     revalidatePath('/admin/boty-ai/logi');
@@ -151,36 +98,24 @@ export async function wygenerujTypDlaMeczu(botUserId, matchId) {
 
     return {
       ok: true,
-      bot: bot.nick,
-      home: aiResult.home,
-      away: aiResult.away,
-      cost: aiResult.costUsd,
-      tokensInput: aiResult.tokensInput,
-      tokensOutput: aiResult.tokensOutput,
+      bot: data.bot,
+      home: data.home,
+      away: data.away,
+      cost: data.cost,
+      tokensInput: data.tokensInput,
+      tokensOutput: data.tokensOutput,
     };
   } catch (e) {
-    // Nawet przy błędzie loguj - admin musi widzieć co AI zwróciło.
-    await sb.from('ai_typing_logs').insert({
-      user_id: botUserId,
-      match_id: matchId,
-      ai_provider: bot.ai_provider,
-      ai_model: bot.ai_model,
-      prompt_type: bot.ai_prompt_type,
-      prompt_used: e.promptUsed || null,
-      raw_response: e.rawResponse || null,
-      tokens_input: e.tokensInput || null,
-      tokens_output: e.tokensOutput || null,
-      error: e.message,
-    });
-
-    return { error: `Błąd AI (${bot.nick}): ${e.message}` };
+    return { error: `Błąd wywołania endpointa: ${e.message}` };
   }
 }
 
-// Wygeneruj typy dla WIELU meczów × WSZYSTKICH botów.
-// Sekwencyjnie - providery mają rate-limity, a 9 wywołań nie potrzebuje
-// równoległości. Każdy wynik jest osobnym wpisem na liście,
-// dzięki czemu UI może pokazać postęp i podsumowanie kosztu.
+// Masowe typowanie - FIRE-AND-FORGET.
+// Server Action filtruje pary (bot × mecz), które jeszcze nie mają
+// predictions, i dla każdej takiej pary uruchamia osobne wywołanie HTTP
+// do endpointa BEZ await. Zwraca natychmiast liczbę zleconych zadań.
+// Wyniki pojawią się w /admin/boty-ai/logi w miarę kończenia pracy
+// poszczególnych botów.
 export async function wygenerujTypyMasowo(matchIds) {
   const auth = await sprawdzAdminaWAkcji();
   if (auth.error) return { error: auth.error };
@@ -188,8 +123,12 @@ export async function wygenerujTypyMasowo(matchIds) {
   if (!Array.isArray(matchIds) || matchIds.length === 0) {
     return { error: 'Wybierz przynajmniej jeden mecz.' };
   }
+  if (!process.env.CRON_SECRET) {
+    return { error: 'Brak CRON_SECRET w env - skonfiguruj zmienną.' };
+  }
 
   const sb = utworzKlientaServiceRole();
+
   const { data: boty, error: botyE } = await sb
     .from('profiles')
     .select('id, nick')
@@ -199,33 +138,76 @@ export async function wygenerujTypyMasowo(matchIds) {
 
   if (botyE) return { error: `Błąd pobrania botów: ${botyE.message}` };
   if (!boty || boty.length === 0) {
-    return { error: 'Brak aktywnych botów AI w bazie. Utwórz lub włącz boty w panelu admina.' };
+    return {
+      error:
+        'Brak aktywnych botów AI w bazie. Utwórz lub włącz boty w panelu admina.',
+    };
   }
 
-  const wyniki = [];
-  let lacznyKoszt = 0;
-  let sukcesy = 0;
-  let bledy = 0;
+  // Pomijamy pary już otypowane - inaczej re-generujemy istniejące typy.
+  // Jedno query zamiast n × maybeSingle().
+  const botIds = boty.map((b) => b.id);
+  const { data: istniejace } = await sb
+    .from('predictions')
+    .select('user_id, match_id')
+    .in('match_id', matchIds)
+    .in('user_id', botIds);
+  const otypowane = new Set(
+    (istniejace || []).map((p) => `${p.user_id}:${p.match_id}`),
+  );
 
+  const zadania = [];
   for (const bot of boty) {
     for (const matchId of matchIds) {
-      const w = await wygenerujTypDlaMeczu(bot.id, matchId);
-      const wpis = { bot: bot.nick, botId: bot.id, matchId, ...w };
-      wyniki.push(wpis);
-      if (w.ok) {
-        sukcesy++;
-        lacznyKoszt += w.cost || 0;
-      } else {
-        bledy++;
-      }
+      if (otypowane.has(`${bot.id}:${matchId}`)) continue;
+      zadania.push({ botUserId: bot.id, matchId, botNick: bot.nick });
     }
   }
 
-  revalidatePath('/admin/boty-ai');
-  revalidatePath('/admin/boty-ai/logi');
-  revalidatePath('/mecze');
+  if (zadania.length === 0) {
+    return {
+      ok: true,
+      zlecone: 0,
+      botow: boty.length,
+      meczow: matchIds.length,
+      info: 'Wszystkie pary bot×mecz już mają typy. Nic do zlecenia.',
+    };
+  }
 
-  return { ok: true, wyniki, lacznyKoszt, sukcesy, bledy };
+  const baseUrl = await pobierzBaseUrl();
+
+  // Fire-and-forget: NIE awaitujemy fetcha. Każde wywołanie startuje na
+  // serwerze niezależnie i ma własny 300s budget. Server Action wraca
+  // natychmiast - UI nie blokuje się na 18 × 60s = 18 min.
+  for (const zad of zadania) {
+    fetch(`${baseUrl}/api/generuj-typ-pojedynczy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.CRON_SECRET}`,
+      },
+      body: JSON.stringify({
+        botUserId: zad.botUserId,
+        matchId: zad.matchId,
+      }),
+      cache: 'no-store',
+    }).catch((e) => {
+      console.error(
+        `[fire-and-forget] błąd zlecania bot=${zad.botNick} match=${zad.matchId}:`,
+        e?.message,
+      );
+    });
+  }
+
+  revalidatePath('/admin/boty-ai');
+
+  return {
+    ok: true,
+    zlecone: zadania.length,
+    botow: boty.length,
+    meczow: matchIds.length,
+    info: `Zlecono ${zadania.length} zadań typowania. Boty pracują w tle - sprawdź /admin/boty-ai/logi za 2-3 minuty.`,
+  };
 }
 
 // Tworzy auth.user dla bota (przez Admin API service_role) i profile
@@ -334,19 +316,25 @@ export async function przelaczAktywnoscBota(botUserId, aktywny) {
 }
 
 // Ręczne odpalenie tego, co normalnie robi cron /api/cron/boty-ai:
-// mecze startujące za 60-90 min × wszystkie aktywne boty (pomija pary
+// mecze startujące w oknie 2h × wszystkie aktywne boty (pomija pary
 // już otypowane). Przycisk "🚀 Wymuś teraz" w panelu diagnostyki.
+// Po refactorze na fire-and-forget zwraca liczbę zleconych zadań -
+// wyniki widać w logach.
 export async function wymusGenerowanieBotow() {
   const auth = await sprawdzAdminaWAkcji();
   if (auth.error) return { error: auth.error };
 
+  if (!process.env.CRON_SECRET) {
+    return { error: 'Brak CRON_SECRET w env - skonfiguruj zmienną.' };
+  }
+
   const sb = utworzKlientaServiceRole();
-  const wynik = await uruchomCronBotow(sb);
+  const baseUrl = await pobierzBaseUrl();
+  const wynik = await uruchomCronBotow(sb, { baseUrl });
 
   revalidatePath('/admin/boty-ai');
   revalidatePath('/admin/boty-ai/diagnostyka-cron');
   revalidatePath('/admin/boty-ai/logi');
-  revalidatePath('/mecze');
 
   if (!wynik.ok) return { error: wynik.error || 'Błąd uruchomienia botów.' };
   return wynik;
