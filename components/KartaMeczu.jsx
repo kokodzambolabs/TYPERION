@@ -23,12 +23,13 @@
 // świeży typ - state z action ma pierwszeństwo nad propem; "✓ Zapisano"
 // flashuje przez 2s dzięki CSS keyframes (flash-zapisano w globals.css).
 
-import { useActionState, useState, useTransition } from 'react';
+import { useActionState, useMemo, useState, useTransition } from 'react';
 import BadgePunktow from './BadgePunktow';
 import PanelCudzychTypow from './SekcjaCudzychTypow';
 import { formatujDateKrotkoPL, formatGrupa } from '@/lib/format';
 import { getFlashscoreUrl } from '@/lib/competitions';
 import { zapiszTyp, pobierzCudzeTypy } from '@/app/akcje/typy';
+import { useUkryjAI } from '@/lib/hooks/useUkryjAI';
 
 export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
   const home = mecz.home_team?.name || `#${mecz.home_team_id}`;
@@ -41,7 +42,15 @@ export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
   const [cudzeTypy, setCudzeTypy] = useState(null);
   const [bladCudze, setBladCudze] = useState(null);
   const [pendingCudze, startCudze] = useTransition();
-  const liczbaInnych = cudzeTypy ? cudzeTypy.length : null;
+  const { ukryjAI } = useUkryjAI();
+
+  // Filtr "Ukryj AI" jest dzielony z /ranking przez localStorage - jeśli
+  // user zaznaczył checkbox na rankingu, boty znikają też z cudzych typów.
+  const widoczneCudze = useMemo(() => {
+    if (!cudzeTypy) return null;
+    return ukryjAI ? cudzeTypy.filter((t) => !t.isBot) : cudzeTypy;
+  }, [cudzeTypy, ukryjAI]);
+  const liczbaInnych = widoczneCudze ? widoczneCudze.length : null;
 
   const przelaczCudze = () => {
     if (otwarteCudze) {
@@ -98,7 +107,7 @@ export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
         <PanelCudzychTypow
           pending={pendingCudze}
           blad={bladCudze}
-          typy={cudzeTypy}
+          typy={widoczneCudze}
         />
       )}
     </div>

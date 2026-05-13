@@ -61,25 +61,27 @@ export default async function MeczePage() {
     nietypowaneDzisiaj.length + nietypowaneJutro.length + nietypowaneNadch.length;
 
   // Pierwszy nietypowany - target dla "Skocz do nietypowanych".
-  // Jeśli jest w nadchodzących na pozycji >= POCZATKOWE_NADCHODZACE, rozszerzamy
-  // wstępne okno tak, by anchor mógł trafić w istniejący element DOM.
+  // Sekcja "Nadchodzące" zawsze pokazuje pierwsze POCZATKOWE_NADCHODZACE meczów
+  // (obstawione i nieobstawione traktowane tak samo) - resztę dociąga
+  // "Pokaż więcej". Jeśli pierwszy nietypowany jest dalej niż okno startowe,
+  // anchorem jest sekcja (sekcja-nadchodzace), nie konkretny mecz - bo element
+  // nie istnieje jeszcze w DOM.
   const pierwszyNietypowany =
     nietypowaneDzisiaj[0] ?? nietypowaneJutro[0] ?? nietypowaneNadch[0] ?? null;
 
-  let nadchPokazTeraz = POCZATKOWE_NADCHODZACE;
-  if (
-    pierwszyNietypowany &&
-    !nietypowaneDzisiaj[0] &&
-    !nietypowaneJutro[0]
-  ) {
-    const idx = nadchodzace.findIndex((m) => m.id === pierwszyNietypowany.id);
-    if (idx >= POCZATKOWE_NADCHODZACE) {
-      nadchPokazTeraz = idx + 1;
-    }
-  }
-
-  const nadchPocz = nadchodzace.slice(0, nadchPokazTeraz);
+  const nadchPocz = nadchodzace.slice(0, POCZATKOWE_NADCHODZACE);
   const zakonPocz = zakonczone.slice(0, POCZATKOWE_ZAKONCZONE);
+
+  let targetSkoku = null;
+  if (pierwszyNietypowany) {
+    const wOknieStartowym =
+      nietypowaneDzisiaj[0] ||
+      nietypowaneJutro[0] ||
+      nadchPocz.some((m) => m.id === pierwszyNietypowany.id);
+    targetSkoku = wOknieStartowym
+      ? `match-${pierwszyNietypowany.id}`
+      : 'sekcja-nadchodzace';
+  }
 
   const typyDla = (mecze) => {
     const ids = new Set(mecze.map((m) => m.id));
@@ -99,10 +101,7 @@ export default async function MeczePage() {
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-8">
       <h1 className="mb-4 text-3xl font-bold text-emerald-50">Mecze</h1>
 
-      <Skrot
-        liczba={liczbaNietypowanych}
-        targetId={pierwszyNietypowany ? `match-${pierwszyNietypowany.id}` : null}
-      />
+      <Skrot liczba={liczbaNietypowanych} targetId={targetSkoku} />
 
       <div className="space-y-7">
         {trwajace.length > 0 && (

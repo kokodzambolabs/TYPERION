@@ -9,8 +9,9 @@
 // chowamy - zostawiamy tylko sumę.
 // Każdy nick to link do /uzytkownik/[id] - profil + historia typów.
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
+import { useUkryjAI } from '@/lib/hooks/useUkryjAI';
 
 const TLO_TOP = {
   1: 'bg-yellow-500/15 border-yellow-400/40',
@@ -25,13 +26,13 @@ const KOLOR_POZYCJI = {
 };
 
 export default function TabelaRankingu({ wiersze, aktualnyUserId }) {
-  const [ukryjBoty, setUkryjBoty] = useState(false);
+  const { ukryjAI, setUkryjAI } = useUkryjAI();
 
   const widoczne = useMemo(() => {
-    const baza = ukryjBoty ? wiersze.filter((w) => !w.is_bot) : wiersze;
+    const baza = ukryjAI ? wiersze.filter((w) => !w.is_bot) : wiersze;
     // Pozycję przeliczamy od nowa - po filtrze numeracja jest ciągła.
     return baza.map((w, i) => ({ ...w, pozycja: i + 1 }));
-  }, [wiersze, ukryjBoty]);
+  }, [wiersze, ukryjAI]);
 
   const sąBoty = wiersze.some((w) => w.is_bot);
 
@@ -41,8 +42,8 @@ export default function TabelaRankingu({ wiersze, aktualnyUserId }) {
         <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-emerald-900/40 bg-emerald-900/20 px-3 py-2 text-sm text-emerald-100">
           <input
             type="checkbox"
-            checked={ukryjBoty}
-            onChange={(e) => setUkryjBoty(e.target.checked)}
+            checked={ukryjAI}
+            onChange={(e) => setUkryjAI(e.target.checked)}
             className="h-4 w-4 cursor-pointer rounded border-emerald-700/60 bg-emerald-950/50 text-emerald-500"
           />
           🤖 Ukryj AI
