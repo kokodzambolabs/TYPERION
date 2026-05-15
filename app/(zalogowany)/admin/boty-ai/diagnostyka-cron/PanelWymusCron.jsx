@@ -1,9 +1,9 @@
 'use client';
 
 // Przycisk "🚀 Wymuś teraz" - ręcznie zleca to, co robi cron botów AI
-// (Server Action wymusGenerowanieBotow). Po refactorze na fire-and-forget
-// wynik pokazuje tylko liczbę zleconych zadań - faktyczne typy lądują
-// w /admin/boty-ai/logi w miarę kończenia pracy botów (do ~5 min/typ).
+// (Server Action wymusGenerowanieBotow). Server Action czeka aż wszystkie
+// child requesty zakończą się (Promise.all + per-fetch timeout 270s), więc
+// kliknięcie wisi do ~5 min. W zamian widać liczbę sukcesów/błędów od ręki.
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
@@ -29,7 +29,8 @@ export default function PanelWymusCron() {
           <h2 className="text-lg font-bold text-emerald-50">Wymuś teraz</h2>
           <p className="text-sm text-emerald-200/70">
             Zleca boty na meczach z okna 0–120 min od teraz, bez czekania na
-            cron. Akcja wraca w &lt;1s - boty pracują w tle.
+            cron. Akcja wisi aż wszystkie boty skończą (do ~5 min) - zobaczysz
+            ile typów sukces / błąd od razu.
           </p>
         </div>
         <Button onClick={onClick} disabled={pending}>
@@ -64,8 +65,10 @@ function Wynik({ wynik }) {
           {wynik.message}
         </p>
       )}
-      <div className="grid grid-cols-3 gap-2 text-sm">
+      <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
         <Stat label="Zlecone" value={wynik.zlecone ?? 0} kolor="emerald" />
+        <Stat label="Sukcesy" value={wynik.sukcesy ?? 0} kolor="emerald" />
+        <Stat label="Błędy" value={wynik.bledy ?? 0} kolor={wynik.bledy ? 'red' : 'emerald'} />
         <Stat label="Pominięto" value={wynik.skipped ?? 0} kolor="amber" />
         <Stat
           label="Mecze × boty"
@@ -75,14 +78,14 @@ function Wynik({ wynik }) {
       </div>
       {(wynik.zlecone ?? 0) > 0 && (
         <p className="rounded-lg border border-sky-500/40 bg-sky-950/30 px-4 py-3 text-sm text-sky-100">
-          🤖 Każde zadanie pracuje w tle (do ~5 min). Odśwież{' '}
+          🤖 Pełne typy z parametrami AI znajdziesz w{' '}
           <Link
             href="/admin/boty-ai/logi"
             className="font-semibold underline hover:text-sky-50"
           >
-            listę logów
-          </Link>{' '}
-          za 2-3 minuty, żeby zobaczyć wyniki.
+            liście logów
+          </Link>
+          .
         </p>
       )}
     </div>

@@ -13,6 +13,11 @@ import { formatujDateKrotkoPL, formatGrupa, formatPromptType } from '@/lib/forma
 import Button from '@/components/Button';
 import PanelWymusCron from './PanelWymusCron';
 
+// Page-level maxDuration podnosi limit dla Server Actions tej strony
+// (Next.js doc: maxDuration.md). wymusGenerowanieBotow czeka na Promise.all
+// 18 child requestów - bez tego mogłaby wpaść w domyślny Vercel timeout.
+export const maxDuration = 300;
+
 export default async function DiagnostykaCronPage() {
   // Dostęp do /admin/** pilnuje admin/layout.js. Dane ciągniemy service_role-em,
   // bo RLS chowa typy botów na nadchodzące mecze (statusy byłyby mylące).
@@ -81,7 +86,7 @@ export default async function DiagnostykaCronPage() {
             Cron <code className="rounded bg-emerald-900/60 px-1">/api/cron/boty-ai</code>{' '}
             (co godzinę, zewnętrznie) zleca typowanie wszystkich nadchodzących
             meczów w oknie {OKNO_OD_MIN}–{OKNO_DO_MIN} min wszystkim aktywnym
-            botom (fire-and-forget - każdy bot pracuje w tle).
+            botom. Dispatch leci w tle (Next.js after / Vercel waitUntil).
           </p>
         </div>
         <Link href="/admin/boty-ai">
