@@ -230,7 +230,7 @@ export async function utworzBotaAI({
   if (!['anthropic', 'google', 'openai'].includes(ai_provider)) {
     return { error: 'Nieprawidłowy provider.' };
   }
-  if (!['deep_research', 'deep_research_thinking', 'quick'].includes(ai_prompt_type)) {
+  if (!['deep_research', 'deep_research_thinking', 'quick', 'casual'].includes(ai_prompt_type)) {
     return { error: 'Nieprawidłowy typ promptu.' };
   }
 
@@ -315,6 +315,31 @@ export async function przelaczAktywnoscBota(botUserId, aktywny) {
   return { ok: true };
 }
 
+// Ukrywa/pokazuje bota dla zwykłych userów (profiles.bot_ukryty).
+// Ortogonalne do bot_active - ukryty bot wciąż pracuje (cron, generowanie,
+// logi), tylko jest niewidoczny w rankingu/cudzych typach/profilach dla
+// nie-adminów. Admin widzi go wszędzie tak jak zwykle.
+export async function przelaczUkrycieBota(botUserId, ukryty) {
+  const auth = await sprawdzAdminaWAkcji();
+  if (auth.error) return { error: auth.error };
+
+  const sb = utworzKlientaServiceRole();
+  const { error } = await sb
+    .from('profiles')
+    .update({ bot_ukryty: !!ukryty })
+    .eq('id', botUserId)
+    .eq('is_bot', true);
+
+  if (error) return { error: `Błąd zmiany widoczności bota: ${error.message}` };
+
+  // Ukryty/odkryty bot zmienia ranking i listę cudzych typów - rewalidujemy
+  // strony, które te dane czytają.
+  revalidatePath('/admin/boty-ai');
+  revalidatePath('/ranking');
+  revalidatePath('/mecze');
+  return { ok: true };
+}
+
 // Ręczne odpalenie tego, co normalnie robi cron /api/cron/boty-ai:
 // mecze startujące w oknie 2h × wszystkie aktywne boty (pomija pary
 // już otypowane). Przycisk "🚀 Wymuś teraz" w panelu diagnostyki.
@@ -330,7 +355,11 @@ export async function wymusGenerowanieBotow() {
 
   const sb = utworzKlientaServiceRole();
   const baseUrl = await pobierzBaseUrl();
-  const wynik = await uruchomCronBotow(sb, { baseUrl });
+  // Mirror crona /api/cron/boty-ai - pomija openai (osobny cron bot-gpt).
+  const wynik = await uruchomCronBotow(sb, {
+    baseUrl,
+    excludeProviders: ['openai'],
+  });
 
   revalidatePath('/admin/boty-ai');
   revalidatePath('/admin/boty-ai/diagnostyka-cron');

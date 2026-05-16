@@ -20,8 +20,24 @@ export default async function RankingPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect('/logowanie');
 
+  // Sprawdzamy is_admin aktualnego usera - admin widzi nawet ukryte boty,
+  // żeby ranking u niego pokazywał pełny stan systemu.
+  const { data: jaProfil } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', user.id)
+    .single();
+  const jestAdmin = !!jaProfil?.is_admin;
+
+  const profileQuery = supabase.from('profiles').select('id, nick, is_bot, bot_ukryty');
+  // Dla nie-adminów filtrujemy ukryte boty od razu na bazie - inaczej
+  // wpadałyby do liczonych sum i numeracji.
+  if (!jestAdmin) {
+    profileQuery.eq('bot_ukryty', false);
+  }
+
   const [{ data: profile }, { data: bonusy }, { data: mecze }] = await Promise.all([
-    supabase.from('profiles').select('id, nick, is_bot'),
+    profileQuery,
     supabase.from('bonus_answers').select('user_id, points'),
     supabase.from('predictions').select('user_id, points'),
   ]);

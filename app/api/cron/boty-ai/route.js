@@ -69,9 +69,15 @@ export async function GET(request) {
 
   // Praca w tle - Vercel waitUntil trzyma kontener aż callback się skończy.
   // Logi z after() lecą do Vercel Functions logs.
+  // Pomijamy ai_provider='openai' - bot ChatGPT casual ma własny cron
+  // (/api/cron/bot-gpt, 150-240 min przed meczem) i nie chcemy go
+  // tu odpalać po raz drugi w innym oknie.
   after(async () => {
     try {
-      const wynik = await uruchomCronBotow(sb, { baseUrl });
+      const wynik = await uruchomCronBotow(sb, {
+        baseUrl,
+        excludeProviders: ['openai'],
+      });
       const ms = Date.now() - start;
       console.log(
         `[cron-boty] (after) zakończone w ${ms}ms - ` +

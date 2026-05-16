@@ -31,18 +31,35 @@ export default async function ProfilUzytkownikaPage({ params }) {
 
   const toJaSam = aktualny.id === id;
 
-  // Profil tego usera (nick).
+  // Sprawdzamy is_admin aktualnego usera - admin widzi profile/ranking
+  // nawet dla ukrytych botów (bot_ukryty=true), zwykli userzy dostają 404.
+  const { data: jaProfil } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', aktualny.id)
+    .single();
+  const jestAdmin = !!jaProfil?.is_admin;
+
+  // Profil tego usera (nick + flagi). Jeśli to ukryty bot i widz nie jest
+  // adminem - notFound (jak gdyby usera w ogóle nie było).
   const { data: profil } = await supabase
     .from('profiles')
-    .select('id, nick')
+    .select('id, nick, is_bot, bot_ukryty')
     .eq('id', id)
     .single();
   if (!profil) notFound();
+  if (profil.bot_ukryty && !jestAdmin) notFound();
 
   // Ranking: ten sam algorytm co /ranking - 3 SELECT-y i merge w JS.
+  // Dla nie-adminów ukryte boty wypadają z liczonej puli (jak na /ranking).
+  const profileQuery = supabase.from('profiles').select('id, nick, bot_ukryty');
+  if (!jestAdmin) {
+    profileQuery.eq('bot_ukryty', false);
+  }
+
   const [{ data: profile }, { data: bonusy }, { data: meczeRanking }] =
     await Promise.all([
-      supabase.from('profiles').select('id, nick'),
+      profileQuery,
       supabase.from('bonus_answers').select('user_id, points'),
       supabase.from('predictions').select('user_id, points'),
     ]);

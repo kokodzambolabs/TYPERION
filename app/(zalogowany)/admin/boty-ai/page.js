@@ -8,6 +8,7 @@ import { formatPromptType } from '@/lib/format';
 import Button from '@/components/Button';
 import PrzyciskUtworzBoty from './PrzyciskUtworzBoty';
 import PrzelacznikBota from './PrzelacznikBota';
+import PrzelacznikWidocznosciBota from './PrzelacznikWidocznosciBota';
 
 export default async function BotyAIPage() {
   // Walidacja admina przez zwykłą sesję (RLS), ale agregaty ciągniemy
@@ -18,7 +19,7 @@ export default async function BotyAIPage() {
 
   const { data: boty } = await supabase
     .from('profiles')
-    .select('id, nick, ai_provider, ai_model, ai_prompt_type, bot_active, created_at')
+    .select('id, nick, ai_provider, ai_model, ai_prompt_type, bot_active, bot_ukryty, created_at')
     .eq('is_bot', true)
     .order('created_at', { ascending: true });
 
@@ -94,6 +95,7 @@ export default async function BotyAIPage() {
                 predictions: 0,
               };
               const aktywny = b.bot_active !== false;
+              const ukryty = b.bot_ukryty === true;
               return (
                 <li
                   key={b.id}
@@ -104,13 +106,18 @@ export default async function BotyAIPage() {
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-emerald-50">
                         {b.nick}
                       </span>
                       {!aktywny && (
                         <span className="rounded bg-rose-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-rose-200">
                           Wyłączony
+                        </span>
+                      )}
+                      {ukryty && (
+                        <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-200">
+                          Ukryty
                         </span>
                       )}
                     </div>
@@ -150,7 +157,10 @@ export default async function BotyAIPage() {
                       kosztów
                     </div>
                   </div>
-                  <PrzelacznikBota botId={b.id} aktywny={aktywny} />
+                  <div className="flex flex-col items-end gap-1.5">
+                    <PrzelacznikBota botId={b.id} aktywny={aktywny} />
+                    <PrzelacznikWidocznosciBota botId={b.id} ukryty={ukryty} />
+                  </div>
                 </li>
               );
             })}

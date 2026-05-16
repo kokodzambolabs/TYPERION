@@ -141,9 +141,18 @@ export async function pobierzCudzeTypy(args) {
   const userIds = predictions.map((p) => p.user_id);
   const { data: profiles, error: profE } = await supabase
     .from('profiles')
-    .select('id, nick, is_bot')
+    .select('id, nick, is_bot, bot_ukryty')
     .in('id', userIds);
   if (profE) return { error: profE.message };
+
+  // Admin widzi cudze typy ukrytych botów - dla zwykłych userów
+  // wypadają z listy całkowicie.
+  const { data: jaProfil } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', user.id)
+    .single();
+  const jestAdmin = !!jaProfil?.is_admin;
 
   const profilMap = new Map();
   for (const p of profiles || []) {
@@ -155,6 +164,11 @@ export async function pobierzCudzeTypy(args) {
   // więc duplikowanie go w liście "cudzych typów" zaśmieca i myli.
   const lista = predictions
     .filter((p) => p.user_id !== user.id)
+    .filter((p) => {
+      if (jestAdmin) return true;
+      const prof = profilMap.get(p.user_id);
+      return !prof?.bot_ukryty;
+    })
     .map((p) => {
       const prof = profilMap.get(p.user_id);
       return {

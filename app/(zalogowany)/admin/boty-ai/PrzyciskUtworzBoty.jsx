@@ -37,6 +37,13 @@ const DOMYSLNE_BOTY = [
     ai_model: 'gemini-3.1-pro-preview',
     ai_prompt_type: 'deep_research',
   },
+  {
+    nick: 'ChatGPT',
+    email: 'chatgpt-casual@typerion.local',
+    ai_provider: 'openai',
+    ai_model: 'gpt-5-mini',
+    ai_prompt_type: 'casual',
+  },
 ];
 
 export default function PrzyciskUtworzBoty({ istniejaceNicki = [] }) {
