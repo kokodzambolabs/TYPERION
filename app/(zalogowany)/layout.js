@@ -76,6 +76,7 @@ function Navbar({ nick, isAdmin }) {
           <NavLink href="/mecze">Mecze</NavLink>
           <NavLink href="/bonusy">Bonusy</NavLink>
           <NavLink href="/ranking">Ranking</NavLink>
+          <NavLink href="/faq">FAQ</NavLink>
           {isAdmin && <NavLink href="/admin">Admin</NavLink>}
         </div>
         <MenuProfilowe nick={nick} />
