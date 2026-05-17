@@ -10,13 +10,14 @@
 // Po sukcesie overlay flash-zapisano-button przykrywa przycisk na 2s
 // (zielony pulsujący ✓), tooltip "✓ Zapisano!".
 
-import { useActionState } from 'react';
+import { useActionState, useState } from 'react';
 import { zapiszOdpowiedzBonusowa } from '@/app/akcje/bonusy';
 
 export default function FormularzBonusow({
   questions,
   userAnswers,
   teams,
+  opcjeMap,
   isOpen,
 }) {
   return (
@@ -27,6 +28,7 @@ export default function FormularzBonusow({
           pytanie={q}
           poczatkowa={userAnswers?.[q.id]}
           teams={teams}
+          opcje={opcjeMap?.[q.id] || []}
           isOpen={isOpen}
         />
       ))}
@@ -71,9 +73,25 @@ function IkonaSpinner({ className = 'h-5 w-5' }) {
   );
 }
 
-function PojedynczePytanie({ pytanie, poczatkowa, teams, isOpen }) {
+function PojedynczePytanie({ pytanie, poczatkowa, teams, opcje, isOpen }) {
   const [state, action, pending] = useActionState(zapiszOdpowiedzBonusowa, null);
   const zapisany = state?.ok && !state?.error;
+
+  // Dla dropdown_other potrzebujemy stanu czy user wybrał "Inny".
+  const [isOther, setIsOther] = useState(!!poczatkowa?.answer_other_flag);
+
+  // Maks. punkty: dla pytań ważonych to max z punkty opcji.
+  const maxPkt = (() => {
+    if (
+      pytanie.question_type === 'dropdown_weighted' ||
+      pytanie.question_type === 'boolean_weighted' ||
+      pytanie.question_type === 'dropdown_other'
+    ) {
+      const m = opcje.reduce((a, o) => (o.punkty > a ? o.punkty : a), 0);
+      return m || pytanie.max_points;
+    }
+    return pytanie.max_points;
+  })();
 
   return (
     <form
@@ -86,24 +104,22 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, isOpen }) {
         <h3 className="text-base font-semibold text-emerald-50">
           {pytanie.text}
         </h3>
-        <span className="text-xs text-emerald-300/70">
-          {pytanie.max_points} pkt
-        </span>
+        <span className="text-xs text-emerald-300/70">do {maxPkt} pkt</span>
       </div>
 
       {pytanie.description && (
         <p className="mb-3 text-sm text-emerald-200/70">{pytanie.description}</p>
       )}
 
-      {/* Pole + przycisk w jednej linii. Pole bierze flex-1, przycisk
-          shrink-0 z fixed w-10 h-10. Na mobile to też zostaje w linii -
-          inputy są węższe niż całość. */}
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <PoleOdpowiedzi
             pytanie={pytanie}
             poczatkowa={poczatkowa}
             teams={teams}
+            opcje={opcje}
+            isOther={isOther}
+            setIsOther={setIsOther}
             disabled={!isOpen || pending}
           />
         </div>
@@ -138,7 +154,15 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, isOpen }) {
   );
 }
 
-function PoleOdpowiedzi({ pytanie, poczatkowa, teams, disabled }) {
+function PoleOdpowiedzi({
+  pytanie,
+  poczatkowa,
+  teams,
+  opcje,
+  isOther,
+  setIsOther,
+  disabled,
+}) {
   if (pytanie.question_type === 'team') {
     const dostepne = pytanie.team_group
       ? teams.filter((t) => t.group_in_tournament === pytanie.team_group)
@@ -205,6 +229,97 @@ function PoleOdpowiedzi({ pytanie, poczatkowa, teams, disabled }) {
         disabled={disabled}
         className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"
       />
+    );
+  }
+
+  if (pytanie.question_type === 'dropdown_weighted') {
+    return (
+      <select
+        name="selectedOptionId"
+        defaultValue={poczatkowa?.selected_option_id ?? ''}
+        disabled={disabled}
+        className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"
+      >
+        <option value="">— wybierz —</option>
+        {opcje.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.opcja_text}
+          </option>
+        ))}
+      </select>
+    );
+  }
+
+  if (pytanie.question_type === 'boolean_weighted') {
+    // Renderujemy jako 2 przyciski Tak/Nie. Opcje powinny się
+    // nazywać "TAK" i "NIE" — szukamy ich po nazwie.
+    const taj = opcje.find((o) => o.opcja_text?.toUpperCase() === 'TAK');
+    const nie = opcje.find((o) => o.opcja_text?.toUpperCase() === 'NIE');
+    const wybrane = poczatkowa?.selected_option_id ?? '';
+    return (
+      <div className="flex h-10 flex-wrap items-center gap-4 text-sm text-emerald-100">
+        {taj && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="radio"
+              name="selectedOptionId"
+              value={taj.id}
+              defaultChecked={wybrane === taj.id}
+              disabled={disabled}
+              className="h-4 w-4 accent-emerald-500"
+            />
+            Tak
+          </label>
+        )}
+        {nie && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="radio"
+              name="selectedOptionId"
+              value={nie.id}
+              defaultChecked={wybrane === nie.id}
+              disabled={disabled}
+              className="h-4 w-4 accent-emerald-500"
+            />
+            Nie
+          </label>
+        )}
+      </div>
+    );
+  }
+
+  if (pytanie.question_type === 'dropdown_other') {
+    return (
+      <div className="space-y-2">
+        <select
+          // Sentinel "__other__" — przy zmianie na to przełączamy isOther i wysyłamy isOther=true.
+          value={isOther ? '__other__' : (poczatkowa?.selected_option_id ?? '')}
+          onChange={(e) => setIsOther(e.target.value === '__other__')}
+          name={isOther ? undefined : 'selectedOptionId'}
+          disabled={disabled}
+          className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"
+        >
+          <option value="">— wybierz —</option>
+          {opcje.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.opcja_text}
+            </option>
+          ))}
+          <option value="__other__">Inny…</option>
+        </select>
+        <input type="hidden" name="isOther" value={isOther ? 'true' : 'false'} />
+        {isOther && (
+          <input
+            type="text"
+            name="answerText"
+            maxLength={200}
+            placeholder="Wpisz własną odpowiedź"
+            defaultValue={poczatkowa?.answer_other_flag ? (poczatkowa?.answer_text ?? '') : ''}
+            disabled={disabled}
+            className="h-10 w-full rounded-md border border-amber-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-amber-400 focus:outline-none disabled:opacity-60"
+          />
+        )}
+      </div>
     );
   }
 

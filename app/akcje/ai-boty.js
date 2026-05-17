@@ -340,6 +340,120 @@ export async function przelaczUkrycieBota(botUserId, ukryty) {
   return { ok: true };
 }
 
+// Masowe generowanie odpowiedzi botów na pytania bonusowe.
+// FIRE-AND-FORGET: dla każdej pary (aktywny bot × nierozliczone pytanie
+// ważone bez odpowiedzi tego bota) wysyłamy POST do
+// /api/generuj-bonus-pojedynczy BEZ await. Każde wywołanie dostaje
+// własny 300s budget Vercel.
+//
+// Obsługiwane typy: dropdown_weighted, boolean_weighted, dropdown_other.
+// Pomijamy pytania bez opcji (boty by się wywaliły na promptcie).
+export async function wygenerujOdpowiedziBonusoweAI() {
+  const auth = await sprawdzAdminaWAkcji();
+  if (auth.error) return { error: auth.error };
+
+  if (!process.env.CRON_SECRET) {
+    return { error: 'Brak CRON_SECRET w env - skonfiguruj zmienną.' };
+  }
+
+  const sb = utworzKlientaServiceRole();
+
+  const { data: boty, error: botyE } = await sb
+    .from('profiles')
+    .select('id, nick')
+    .eq('is_bot', true)
+    .eq('bot_active', true)
+    .order('created_at', { ascending: true });
+  if (botyE) return { error: `Błąd pobrania botów: ${botyE.message}` };
+  if (!boty || boty.length === 0) {
+    return { error: 'Brak aktywnych botów AI.' };
+  }
+
+  const OBSLUGIWANE = ['dropdown_weighted', 'boolean_weighted', 'dropdown_other'];
+
+  // Pytania ważone, nierozliczone.
+  const { data: pytania, error: pytE } = await sb
+    .from('bonus_questions')
+    .select('id, question_type, is_settled')
+    .in('question_type', OBSLUGIWANE)
+    .eq('is_settled', false);
+  if (pytE) return { error: `Błąd pobrania pytań: ${pytE.message}` };
+  if (!pytania || pytania.length === 0) {
+    return { ok: true, zlecone: 0, info: 'Brak pytań ważonych do otypowania.' };
+  }
+
+  // Pytania z opcjami (boty bez opcji nie mają z czego wybrać).
+  const pytaniaIds = pytania.map((p) => p.id);
+  const { data: opcje } = await sb
+    .from('bonus_question_options')
+    .select('question_id')
+    .in('question_id', pytaniaIds);
+  const pytaniaZOpcjami = new Set((opcje || []).map((o) => o.question_id));
+
+  // Pomijamy pary już otypowane.
+  const botIds = boty.map((b) => b.id);
+  const { data: istniejace } = await sb
+    .from('bonus_answers')
+    .select('user_id, question_id')
+    .in('question_id', pytaniaIds)
+    .in('user_id', botIds);
+  const otypowane = new Set(
+    (istniejace || []).map((a) => `${a.user_id}:${a.question_id}`),
+  );
+
+  const zadania = [];
+  for (const bot of boty) {
+    for (const pyt of pytania) {
+      if (!pytaniaZOpcjami.has(pyt.id)) continue;
+      if (otypowane.has(`${bot.id}:${pyt.id}`)) continue;
+      zadania.push({ botUserId: bot.id, questionId: pyt.id, botNick: bot.nick });
+    }
+  }
+
+  if (zadania.length === 0) {
+    return {
+      ok: true,
+      zlecone: 0,
+      botow: boty.length,
+      pytan: pytania.length,
+      info: 'Wszystkie pary bot×pytanie już mają odpowiedzi (albo pytania nie mają opcji).',
+    };
+  }
+
+  const baseUrl = await pobierzBaseUrl();
+
+  for (const zad of zadania) {
+    fetch(`${baseUrl}/api/generuj-bonus-pojedynczy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${process.env.CRON_SECRET}`,
+      },
+      body: JSON.stringify({
+        botUserId: zad.botUserId,
+        questionId: zad.questionId,
+      }),
+      cache: 'no-store',
+    }).catch((e) => {
+      console.error(
+        `[fire-and-forget bonus] błąd zlecania bot=${zad.botNick} q=${zad.questionId}:`,
+        e?.message,
+      );
+    });
+  }
+
+  revalidatePath('/admin/boty-ai');
+  revalidatePath('/admin/bonusy');
+
+  return {
+    ok: true,
+    zlecone: zadania.length,
+    botow: boty.length,
+    pytan: pytania.length,
+    info: `Zlecono ${zadania.length} zadań. Boty pracują w tle — sprawdź /admin/boty-ai/logi za 2–5 min.`,
+  };
+}
+
 // Ręczne odpalenie tego, co normalnie robi cron /api/cron/boty-ai:
 // mecze startujące w oknie 2h × wszystkie aktywne boty (pomija pary
 // już otypowane). Przycisk "🚀 Wymuś teraz" w panelu diagnostyki.

@@ -66,35 +66,50 @@ export default function FormularzRozliczania({
     });
   };
 
+  const pokazPoprawna = pytanie.question_type !== 'dropdown_other';
+
   return (
     <div className="space-y-8">
-      <section>
-        <h2 className="mb-2 text-lg font-semibold text-emerald-100">
-          Poprawna odpowiedź (referencja)
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={poprawna}
-            onChange={(e) => setPoprawna(e.target.value)}
-            placeholder={
-              pytanie.question_type === 'number' ? 'np. 12' : 'np. Robert Lewandowski'
-            }
-            className="min-w-0 flex-1 rounded-lg border border-emerald-800/60 bg-emerald-950/50 px-3 py-2 text-emerald-50 placeholder-emerald-300/40 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/40"
-          />
-          <Button
-            variant="secondary"
-            disabled={pendingPoprawna || !poprawna.trim()}
-            onClick={zapiszPoprawnaH}
-          >
-            {pendingPoprawna ? 'Zapisuję…' : 'Zapisz'}
-          </Button>
-        </div>
-      </section>
+      {pokazPoprawna && (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold text-emerald-100">
+            Poprawna odpowiedź (referencja)
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={poprawna}
+              onChange={(e) => setPoprawna(e.target.value)}
+              placeholder={
+                pytanie.question_type === 'number'
+                  ? 'np. 12'
+                  : 'np. Robert Lewandowski'
+              }
+              className="min-w-0 flex-1 rounded-lg border border-emerald-800/60 bg-emerald-950/50 px-3 py-2 text-emerald-50 placeholder-emerald-300/40 outline-none transition focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/40"
+            />
+            <Button
+              variant="secondary"
+              disabled={pendingPoprawna || !poprawna.trim()}
+              onClick={zapiszPoprawnaH}
+            >
+              {pendingPoprawna ? 'Zapisuję…' : 'Zapisz'}
+            </Button>
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="mb-3 text-lg font-semibold text-emerald-100">
-          Odpowiedzi userów ({odpowiedzi.length})
+          {pytanie.question_type === 'dropdown_other'
+            ? `Odpowiedzi „Inny” (${odpowiedzi.length})`
+            : `Odpowiedzi userów (${odpowiedzi.length})`}
         </h2>
+        {pytanie.question_type === 'dropdown_other' && (
+          <p className="mb-3 rounded-md border border-amber-500/40 bg-amber-950/20 px-3 py-2 text-xs text-amber-100">
+            Tu są tylko odpowiedzi „Inny”. Pozostałe (z listy opcji) rozliczył
+            automat. Wpisz punkty dla wpisanych przez userów odpowiedzi i kliknij
+            „Oznacz jako rozliczone” gdy skończysz.
+          </p>
+        )}
         {odpowiedzi.length === 0 ? (
           <p className="rounded-xl border border-emerald-900/40 bg-emerald-900/10 px-6 py-8 text-center text-emerald-200/60">
             Brak odpowiedzi userów na to pytanie.

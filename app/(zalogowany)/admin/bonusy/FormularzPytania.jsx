@@ -17,7 +17,7 @@ export default function FormularzPytania({
 }) {
   const [stan, action, pending] = useActionState(akcja, null);
   const [questionType, setQuestionType] = useState(
-    defaultValues.question_type ?? 'team',
+    defaultValues.question_type ?? 'dropdown_weighted',
   );
 
   return (
@@ -89,7 +89,13 @@ export default function FormularzPytania({
 
       <div className="grid grid-cols-2 gap-3">
         <Pole
-          label="Punkty za poprawną"
+          label={
+            questionType === 'dropdown_weighted' ||
+            questionType === 'boolean_weighted' ||
+            questionType === 'dropdown_other'
+              ? 'Max punkty (informacyjnie)'
+              : 'Punkty za poprawną'
+          }
           name="max_points"
           type="number"
           defaultValue={defaultValues.max_points ?? 5}
@@ -106,6 +112,16 @@ export default function FormularzPytania({
           min={0}
         />
       </div>
+
+      {(questionType === 'dropdown_weighted' ||
+        questionType === 'boolean_weighted' ||
+        questionType === 'dropdown_other') && (
+        <p className="rounded-md border border-emerald-700/40 bg-emerald-900/20 px-3 py-2 text-xs text-emerald-200/80">
+          Dla pytań ważonych punkty są przypisane do KAŻDEJ opcji osobno
+          (poniżej, po zapisaniu pytania). Pole „Max punkty” jest informacyjne
+          i służy tylko jako sugestia w UI.
+        </p>
+      )}
 
       {stan?.error && (
         <p className="rounded-md border border-red-500/40 bg-red-950/50 px-3 py-2 text-sm text-red-200">

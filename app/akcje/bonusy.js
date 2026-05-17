@@ -1,7 +1,8 @@
 'use server';
 
 // Server Actions dla pytań bonusowych (panel admina /admin/bonusy).
-// Pytania, poprawne odpowiedzi, automatyczne i ręczne rozliczanie.
+// Pytania, opcje (dla typów ważonych), poprawne odpowiedzi, automatyczne
+// i ręczne rozliczanie.
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
@@ -9,7 +10,20 @@ import { z } from 'zod';
 import { sprawdzAdmina } from '@/lib/admin';
 import { createClient } from '@/lib/supabase/server';
 
-const TYPY = ['team', 'boolean', 'text', 'number'];
+const TYPY = [
+  'team',
+  'boolean',
+  'text',
+  'number',
+  'dropdown_weighted',
+  'boolean_weighted',
+  'dropdown_other',
+];
+
+// Typy ważone — punktacja per OPCJA (bonus_question_options.punkty),
+// nie per pytanie (bonus_questions.max_points zostaje tylko dla kompat.).
+const TYPY_WAZONE = ['dropdown_weighted', 'boolean_weighted', 'dropdown_other'];
+
 // MŚ 2026 — 48 drużyn w 12 grupach (A–L), nie 8 jak w starszych edycjach.
 const GRUPY_MS = [
   'GROUP_A', 'GROUP_B', 'GROUP_C', 'GROUP_D',
@@ -107,7 +121,8 @@ export async function usunPytanie(id) {
   const pytanieId = Number(id);
   if (!pytanieId) return { error: 'Nieprawidłowy identyfikator pytania.' };
 
-  // bonus_answers kasują się kaskadowo (FK ON DELETE CASCADE).
+  // bonus_answers i bonus_question_options kasują się kaskadowo
+  // (FK ON DELETE CASCADE).
   const { error } = await auth.supabase
     .from('bonus_questions')
     .delete()
@@ -117,6 +132,162 @@ export async function usunPytanie(id) {
   revalidatePath('/admin/bonusy');
   revalidatePath('/admin');
   return { ok: true };
+}
+
+// ----- Opcje pytań ważonych (bonus_question_options) -----
+
+const SchematOpcji = z.object({
+  opcja_text: z
+    .string()
+    .trim()
+    .min(1, { message: 'Tekst opcji nie może być pusty.' })
+    .max(200, { message: 'Tekst opcji max 200 znaków.' }),
+  punkty: z.coerce
+    .number()
+    .int()
+    .min(0, { message: 'Punkty min 0.' })
+    .max(1000, { message: 'Punkty max 1000.' }),
+  kolejnosc: z.coerce.number().int().min(0).default(0),
+});
+
+export async function dodajOpcje(pytanieId, _prev, formData) {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return auth;
+
+  const qId = Number(pytanieId);
+  if (!qId) return { error: 'Nieprawidłowy identyfikator pytania.' };
+
+  const parsed = SchematOpcji.safeParse({
+    opcja_text: formData.get('opcja_text') ?? '',
+    punkty: formData.get('punkty') ?? 0,
+    kolejnosc: formData.get('kolejnosc') ?? 0,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const { error } = await auth.supabase
+    .from('bonus_question_options')
+    .insert({ question_id: qId, ...parsed.data });
+  if (error) return { error: error.message };
+
+  revalidatePath(`/admin/bonusy/${qId}/edycja`);
+  return { ok: 'Opcja dodana.' };
+}
+
+export async function edytujOpcje(opcjaId, _prev, formData) {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return auth;
+
+  const oId = Number(opcjaId);
+  if (!oId) return { error: 'Nieprawidłowy identyfikator opcji.' };
+
+  const parsed = SchematOpcji.safeParse({
+    opcja_text: formData.get('opcja_text') ?? '',
+    punkty: formData.get('punkty') ?? 0,
+    kolejnosc: formData.get('kolejnosc') ?? 0,
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  const { data: opcja, error: opcjaE } = await auth.supabase
+    .from('bonus_question_options')
+    .update(parsed.data)
+    .eq('id', oId)
+    .select('question_id')
+    .single();
+  if (opcjaE) return { error: opcjaE.message };
+
+  if (opcja?.question_id) {
+    revalidatePath(`/admin/bonusy/${opcja.question_id}/edycja`);
+  }
+  return { ok: 'Opcja zaktualizowana.' };
+}
+
+// Zapis punktów dla pojedynczej opcji (inline edit z panelu admina).
+// Wywoływany z useTransition na karcie opcji - przyjmuje liczbę.
+export async function zapiszPunktyOpcji(opcjaId, punkty) {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return auth;
+
+  const oId = Number(opcjaId);
+  const pkt = Number(punkty);
+  if (!oId) return { error: 'Nieprawidłowy identyfikator opcji.' };
+  if (!Number.isFinite(pkt) || pkt < 0 || pkt > 1000) {
+    return { error: 'Punkty muszą być w zakresie 0–1000.' };
+  }
+
+  const { data: opcja, error } = await auth.supabase
+    .from('bonus_question_options')
+    .update({ punkty: pkt })
+    .eq('id', oId)
+    .select('question_id')
+    .single();
+  if (error) return { error: error.message };
+
+  if (opcja?.question_id) {
+    revalidatePath(`/admin/bonusy/${opcja.question_id}/edycja`);
+  }
+  return { ok: 'Zapisano.' };
+}
+
+export async function usunOpcje(opcjaId) {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return auth;
+
+  const oId = Number(opcjaId);
+  if (!oId) return { error: 'Nieprawidłowy identyfikator opcji.' };
+
+  // bonus_answers.selected_option_id leci na NULL (FK SET NULL),
+  // odpowiedzi userów zostają - admin może je obejrzeć / rozliczyć ręcznie.
+  const { data: opcja, error: getE } = await auth.supabase
+    .from('bonus_question_options')
+    .select('question_id')
+    .eq('id', oId)
+    .single();
+  if (getE) return { error: getE.message };
+
+  const { error } = await auth.supabase
+    .from('bonus_question_options')
+    .delete()
+    .eq('id', oId);
+  if (error) return { error: error.message };
+
+  if (opcja?.question_id) {
+    revalidatePath(`/admin/bonusy/${opcja.question_id}/edycja`);
+  }
+  return { ok: true };
+}
+
+// Oznacz opcję jako poprawną (resetuje is_correct na innych opcjach
+// tego samego pytania - partial unique index pilnuje, że jest max 1).
+export async function oznaczOpcjePoprawna(opcjaId) {
+  const auth = await sprawdzAdmina();
+  if (auth.error) return auth;
+
+  const oId = Number(opcjaId);
+  if (!oId) return { error: 'Nieprawidłowy identyfikator opcji.' };
+
+  const { data: opcja, error: getE } = await auth.supabase
+    .from('bonus_question_options')
+    .select('question_id')
+    .eq('id', oId)
+    .single();
+  if (getE || !opcja) return { error: getE?.message || 'Opcja nie istnieje.' };
+
+  // Najpierw zerujemy wszystkie - inaczej UNIQUE INDEX (where is_correct=true)
+  // odrzuci nasz UPDATE, bo dwa wiersze byłyby chwilowo true.
+  const { error: clearE } = await auth.supabase
+    .from('bonus_question_options')
+    .update({ is_correct: false })
+    .eq('question_id', opcja.question_id);
+  if (clearE) return { error: clearE.message };
+
+  const { error: setE } = await auth.supabase
+    .from('bonus_question_options')
+    .update({ is_correct: true })
+    .eq('id', oId);
+  if (setE) return { error: setE.message };
+
+  revalidatePath(`/admin/bonusy/${opcja.question_id}/edycja`);
+  return { ok: 'Oznaczono jako poprawną.' };
 }
 
 // ----- Poprawne odpowiedzi i rozliczanie -----
@@ -159,7 +330,6 @@ export async function zapiszPoprawnaOdpowiedz(id, _prev, formData) {
   };
   if (parsed.data.question_type === 'team') {
     if (!parsed.data.correct_team_id) return { error: 'Wybierz drużynę.' };
-    // Jeśli pytanie ma filtr grupy - sprawdź czy wybrana drużyna do niej należy.
     const { data: pytanie } = await auth.supabase
       .from('bonus_questions')
       .select('team_group')
@@ -210,46 +380,111 @@ export async function rozliczAutomatycznie(id) {
     .single();
   if (pytE || !pytanie) return { error: pytE?.message || 'Pytanie nie istnieje.' };
 
-  if (pytanie.question_type !== 'team' && pytanie.question_type !== 'boolean') {
-    return { error: 'Automatyczne rozliczanie tylko dla pytań typu drużyna lub Tak/Nie.' };
-  }
-  if (pytanie.question_type === 'team' && !pytanie.correct_team_id) {
-    return { error: 'Najpierw wpisz poprawną odpowiedź (drużynę).' };
-  }
-  if (pytanie.question_type === 'boolean' && pytanie.correct_boolean === null) {
-    return { error: 'Najpierw wpisz poprawną odpowiedź (Tak/Nie).' };
-  }
+  // Stare typy team/boolean - prosta logika "trafił -> max_points".
+  if (pytanie.question_type === 'team' || pytanie.question_type === 'boolean') {
+    if (pytanie.question_type === 'team' && !pytanie.correct_team_id) {
+      return { error: 'Najpierw wpisz poprawną odpowiedź (drużynę).' };
+    }
+    if (pytanie.question_type === 'boolean' && pytanie.correct_boolean === null) {
+      return { error: 'Najpierw wpisz poprawną odpowiedź (Tak/Nie).' };
+    }
 
-  const { data: odpowiedzi, error: oE } = await auth.supabase
-    .from('bonus_answers')
-    .select('id, answer_team_id, answer_boolean')
-    .eq('question_id', pytanieId);
-  if (oE) return { error: oE.message };
-
-  // Aktualizujemy każdą odpowiedź osobno - PostgREST nie ma bulk UPDATE
-  // z różnymi wartościami per wiersz. Dla bonusów to akceptowalne (rzadkie,
-  // mała liczba odpowiedzi).
-  for (const odp of odpowiedzi || []) {
-    const pasuje =
-      pytanie.question_type === 'team'
-        ? odp.answer_team_id === pytanie.correct_team_id
-        : odp.answer_boolean === pytanie.correct_boolean;
-    const punkty = pasuje ? pytanie.max_points : 0;
-    const { error } = await auth.supabase
+    const { data: odpowiedzi, error: oE } = await auth.supabase
       .from('bonus_answers')
-      .update({ points: punkty, updated_at: new Date().toISOString() })
-      .eq('id', odp.id);
-    if (error) return { error: `Błąd przy odpowiedzi #${odp.id}: ${error.message}` };
+      .select('id, answer_team_id, answer_boolean')
+      .eq('question_id', pytanieId);
+    if (oE) return { error: oE.message };
+
+    for (const odp of odpowiedzi || []) {
+      const pasuje =
+        pytanie.question_type === 'team'
+          ? odp.answer_team_id === pytanie.correct_team_id
+          : odp.answer_boolean === pytanie.correct_boolean;
+      const punkty = pasuje ? pytanie.max_points : 0;
+      const { error } = await auth.supabase
+        .from('bonus_answers')
+        .update({ points: punkty, updated_at: new Date().toISOString() })
+        .eq('id', odp.id);
+      if (error) return { error: `Błąd przy odpowiedzi #${odp.id}: ${error.message}` };
+    }
+
+    await auth.supabase
+      .from('bonus_questions')
+      .update({ is_settled: true })
+      .eq('id', pytanieId);
+
+    revalidatePath('/admin/bonusy');
+    revalidatePath(`/admin/bonusy/${pytanieId}/edycja`);
+    return { ok: `Rozliczono ${odpowiedzi?.length ?? 0} odpowiedzi.` };
   }
 
-  await auth.supabase
-    .from('bonus_questions')
-    .update({ is_settled: true })
-    .eq('id', pytanieId);
+  // Nowe typy ważone: dropdown_weighted, boolean_weighted, dropdown_other.
+  // Punktacja idzie z bonus_question_options.punkty wybranej opcji,
+  // jeśli ta opcja jest oznaczona is_correct=true.
+  // Dla dropdown_other "Inny" (answer_other_flag=true) - rozliczanie RĘCZNE,
+  // pomijamy w automacie i admin wpisuje points sam pod /rozlicz.
+  if (TYPY_WAZONE.includes(pytanie.question_type)) {
+    const { data: opcje, error: opcjeE } = await auth.supabase
+      .from('bonus_question_options')
+      .select('id, punkty, is_correct')
+      .eq('question_id', pytanieId);
+    if (opcjeE) return { error: opcjeE.message };
 
-  revalidatePath('/admin/bonusy');
-  revalidatePath(`/admin/bonusy/${pytanieId}/edycja`);
-  return { ok: `Rozliczono ${odpowiedzi?.length ?? 0} odpowiedzi.` };
+    const poprawne = (opcje || []).filter((o) => o.is_correct);
+    if (poprawne.length === 0) {
+      return { error: 'Najpierw oznacz poprawną opcję w panelu opcji.' };
+    }
+    const poprawnaId = poprawne[0].id;
+    const punktyZaPoprawna = poprawne[0].punkty ?? 0;
+
+    const { data: odpowiedzi, error: oE } = await auth.supabase
+      .from('bonus_answers')
+      .select('id, selected_option_id, answer_other_flag')
+      .eq('question_id', pytanieId);
+    if (oE) return { error: oE.message };
+
+    let rozliczonych = 0;
+    let pominietych = 0;
+    for (const odp of odpowiedzi || []) {
+      // "Inny" zostawiamy adminowi (ręczne rozliczenie).
+      if (odp.answer_other_flag) {
+        pominietych += 1;
+        continue;
+      }
+      const pasuje = odp.selected_option_id === poprawnaId;
+      const punkty = pasuje ? punktyZaPoprawna : 0;
+      const { error } = await auth.supabase
+        .from('bonus_answers')
+        .update({ points: punkty, updated_at: new Date().toISOString() })
+        .eq('id', odp.id);
+      if (error) return { error: `Błąd przy odpowiedzi #${odp.id}: ${error.message}` };
+      rozliczonych += 1;
+    }
+
+    // Jeśli są "Inny" do rozliczenia ręcznego - nie zamykamy pytania,
+    // admin musi je domknąć po wpisaniu punktów.
+    if (pominietych === 0) {
+      await auth.supabase
+        .from('bonus_questions')
+        .update({ is_settled: true })
+        .eq('id', pytanieId);
+    }
+
+    revalidatePath('/admin/bonusy');
+    revalidatePath(`/admin/bonusy/${pytanieId}/edycja`);
+    revalidatePath(`/admin/bonusy/${pytanieId}/rozlicz`);
+    return {
+      ok:
+        pominietych > 0
+          ? `Rozliczono ${rozliczonych} odpowiedzi. ${pominietych} z odpowiedzią "Inny" — dopisz punkty ręcznie pod „Rozlicz”.`
+          : `Rozliczono ${rozliczonych} odpowiedzi.`,
+    };
+  }
+
+  return {
+    error:
+      'Automatyczne rozliczanie tylko dla typów: team, boolean, dropdown_weighted, boolean_weighted, dropdown_other.',
+  };
 }
 
 export async function zapiszPunktyOdpowiedzi(id, lista) {
@@ -295,6 +530,12 @@ const SchematOdpowiedzi = z.object({
     .nullable()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
+  selectedOptionId: z.coerce.number().int().positive().nullable().optional(),
+  isOther: z
+    .enum(['true', 'false'])
+    .nullable()
+    .optional()
+    .transform((v) => v === 'true'),
 });
 
 export async function zapiszOdpowiedzBonusowa(_prev, formData) {
@@ -310,6 +551,8 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
     answerTeamId: formData.get('answerTeamId') || null,
     answerBoolean: formData.get('answerBoolean') || null,
     answerText: formData.get('answerText') ?? '',
+    selectedOptionId: formData.get('selectedOptionId') || null,
+    isOther: formData.get('isOther') || null,
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
@@ -330,15 +573,17 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
     return { error: 'Bonusy zamknięte.' };
   }
 
-  // Walidacja zależnie od typu - tylko jedno z answer_* pól ma być wypełnione.
   const wpis = {
     user_id: user.id,
     question_id: parsed.data.questionId,
     answer_team_id: null,
     answer_boolean: null,
     answer_text: null,
+    selected_option_id: null,
+    answer_other_flag: false,
     updated_at: new Date().toISOString(),
   };
+
   if (pytanie.question_type === 'team') {
     if (!parsed.data.answerTeamId) return { error: 'Wybierz drużynę.' };
     // RLS nie egzekwuje team_group - musimy to sprawdzić sami,
@@ -363,7 +608,45 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
       return { error: 'Odpowiedź musi być liczbą.' };
     }
     wpis.answer_text = parsed.data.answerText;
+  } else if (
+    pytanie.question_type === 'dropdown_weighted' ||
+    pytanie.question_type === 'boolean_weighted'
+  ) {
+    if (!parsed.data.selectedOptionId) return { error: 'Wybierz odpowiedź.' };
+    // Walidujemy, że opcja należy do tego pytania (klient mógłby podstawić cudzą).
+    const { data: opcja } = await supabase
+      .from('bonus_question_options')
+      .select('id, question_id, opcja_text')
+      .eq('id', parsed.data.selectedOptionId)
+      .single();
+    if (!opcja || opcja.question_id !== parsed.data.questionId) {
+      return { error: 'Nieprawidłowa opcja.' };
+    }
+    wpis.selected_option_id = opcja.id;
+    wpis.answer_text = opcja.opcja_text; // dla wygody odczytu/rankingu
+  } else if (pytanie.question_type === 'dropdown_other') {
+    if (parsed.data.isOther) {
+      if (!parsed.data.answerText) {
+        return { error: 'Wpisz własną odpowiedź dla "Inny".' };
+      }
+      wpis.answer_other_flag = true;
+      wpis.answer_text = parsed.data.answerText;
+      wpis.selected_option_id = null;
+    } else {
+      if (!parsed.data.selectedOptionId) return { error: 'Wybierz odpowiedź.' };
+      const { data: opcja } = await supabase
+        .from('bonus_question_options')
+        .select('id, question_id, opcja_text')
+        .eq('id', parsed.data.selectedOptionId)
+        .single();
+      if (!opcja || opcja.question_id !== parsed.data.questionId) {
+        return { error: 'Nieprawidłowa opcja.' };
+      }
+      wpis.selected_option_id = opcja.id;
+      wpis.answer_text = opcja.opcja_text;
+    }
   } else {
+    // 'text'
     if (!parsed.data.answerText) return { error: 'Wpisz odpowiedź.' };
     wpis.answer_text = parsed.data.answerText;
   }

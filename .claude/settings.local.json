@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npx eslint *)",
       "Bash(npx next *)",
-      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"C:\\\\Users\\\\tarda\\\\projekty\\\\typer\\\\gemini-pliki.zip\"\\); $entries = $zip.Entries | ForEach-Object { \"$\\($_.FullName\\)  \\($\\($_.Length\\) B\\)\" }; $zip.Dispose\\(\\); $entries)"
+      "PowerShell(Add-Type -AssemblyName System.IO.Compression.FileSystem; $zip = [System.IO.Compression.ZipFile]::OpenRead\\(\"C:\\\\Users\\\\tarda\\\\projekty\\\\typer\\\\gemini-pliki.zip\"\\); $entries = $zip.Entries | ForEach-Object { \"$\\($_.FullName\\)  \\($\\($_.Length\\) B\\)\" }; $zip.Dispose\\(\\); $entries)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

@@ -22,15 +22,26 @@ export default async function RozliczPage({ params }) {
     .single();
 
   if (!pytanie) notFound();
-  if (pytanie.question_type !== 'text' && pytanie.question_type !== 'number') {
+  const reczne = ['text', 'number', 'dropdown_other'].includes(
+    pytanie.question_type,
+  );
+  if (!reczne) {
     redirect(`/admin/bonusy/${pytanie.id}/edycja`);
   }
 
-  const { data: odpowiedzi } = await supabase
+  // Dla dropdown_other pokazujemy WYŁĄCZNIE odpowiedzi "Inny" - resztę
+  // rozliczył już automat z opcji. Dla text/number pokazujemy wszystkie.
+  let zapytanie = supabase
     .from('bonus_answers')
-    .select('id, user_id, answer_text, points, profil:user_id ( nick )')
+    .select(
+      'id, user_id, answer_text, answer_other_flag, points, profil:user_id ( nick )',
+    )
     .eq('question_id', pytanie.id)
     .order('id', { ascending: true });
+  if (pytanie.question_type === 'dropdown_other') {
+    zapytanie = zapytanie.eq('answer_other_flag', true);
+  }
+  const { data: odpowiedzi } = await zapytanie;
 
   // Bind id - klient wysyła tylko listę / FormData / nic.
   const akcjaZapiszPunkty = zapiszPunktyOdpowiedzi.bind(null, pytanie.id);

@@ -9,6 +9,7 @@ import Button from '@/components/Button';
 import PrzyciskUtworzBoty from './PrzyciskUtworzBoty';
 import PrzelacznikBota from './PrzelacznikBota';
 import PrzelacznikWidocznosciBota from './PrzelacznikWidocznosciBota';
+import PrzyciskGenerujBonusy from './PrzyciskGenerujBonusy';
 
 export default async function BotyAIPage() {
   // Walidacja admina przez zwykłą sesję (RLS), ale agregaty ciągniemy
@@ -174,6 +175,15 @@ export default async function BotyAIPage() {
           <span className="font-mono text-base font-bold text-emerald-50">
             ${lacznyKoszt.toFixed(4)}
           </span>
+        </div>
+
+        <div className="mt-4 rounded-lg border border-purple-700/40 bg-purple-900/10 px-4 py-3">
+          <p className="mb-3 text-sm text-purple-100">
+            <strong>Bonusy:</strong> jednorazowo wygeneruj odpowiedzi botów na
+            wszystkie pytania bonusowe (przed startem MŚ). Fire-and-forget —
+            wyniki widać w logach po 2–5 min.
+          </p>
+          <PrzyciskGenerujBonusy />
         </div>
       </section>
 

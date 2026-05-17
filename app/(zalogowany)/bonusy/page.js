@@ -15,28 +15,46 @@ export default async function BonusyPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect('/logowanie');
 
-  const [{ data: settings }, { data: pytania }, { data: teams }, { data: odpowiedzi }] =
-    await Promise.all([
-      supabase
-        .from('tournament_settings')
-        .select('bonuses_close_at, tournament_name')
-        .eq('id', 1)
-        .single(),
-      supabase
-        .from('bonus_questions')
-        .select(
-          'id, text, description, question_type, max_points, order_index, is_settled, correct_team_id, correct_boolean, correct_answer, team_group',
-        )
-        .order('order_index', { ascending: true }),
-      supabase
-        .from('teams')
-        .select('id, name, group_in_tournament')
-        .order('name', { ascending: true }),
-      supabase
-        .from('bonus_answers')
-        .select('id, question_id, answer_team_id, answer_boolean, answer_text, points')
-        .eq('user_id', user.id),
-    ]);
+  const [
+    { data: settings },
+    { data: pytania },
+    { data: teams },
+    { data: odpowiedzi },
+    { data: opcje },
+  ] = await Promise.all([
+    supabase
+      .from('tournament_settings')
+      .select('bonuses_close_at, tournament_name')
+      .eq('id', 1)
+      .single(),
+    supabase
+      .from('bonus_questions')
+      .select(
+        'id, text, description, question_type, max_points, order_index, is_settled, correct_team_id, correct_boolean, correct_answer, team_group',
+      )
+      .order('order_index', { ascending: true }),
+    supabase
+      .from('teams')
+      .select('id, name, group_in_tournament')
+      .order('name', { ascending: true }),
+    supabase
+      .from('bonus_answers')
+      .select(
+        'id, question_id, answer_team_id, answer_boolean, answer_text, points, selected_option_id, answer_other_flag',
+      )
+      .eq('user_id', user.id),
+    supabase
+      .from('bonus_question_options')
+      .select('id, question_id, opcja_text, punkty, kolejnosc, is_correct')
+      .order('kolejnosc', { ascending: true }),
+  ]);
+
+  // Grupowanie opcji per pytanie - przyda się i w formularzu, i w trybie odczytu.
+  const opcjeMap = {};
+  for (const o of opcje || []) {
+    if (!opcjeMap[o.question_id]) opcjeMap[o.question_id] = [];
+    opcjeMap[o.question_id].push(o);
+  }
 
   const closeAt = settings?.bonuses_close_at ? new Date(settings.bonuses_close_at) : null;
   const isOpen = !!closeAt && closeAt.getTime() > new Date().getTime();
@@ -71,6 +89,7 @@ export default async function BonusyPage() {
           questions={pytania}
           userAnswers={odpMap}
           teams={teams || []}
+          opcjeMap={opcjeMap}
           isOpen={true}
         />
       ) : (
@@ -78,6 +97,7 @@ export default async function BonusyPage() {
           pytania={pytania}
           odpowiedzi={odpMap}
           teams={teams || []}
+          opcjeMap={opcjeMap}
         />
       )}
     </main>
@@ -111,14 +131,16 @@ function BannerZamkniete() {
   );
 }
 
-function ListaTylkoOdczyt({ pytania, odpowiedzi, teams }) {
+function ListaTylkoOdczyt({ pytania, odpowiedzi, teams, opcjeMap }) {
   const teamNazwa = (id) => teams.find((t) => t.id === id)?.name || `#${id}`;
   return (
     <ul className="space-y-3">
       {pytania.map((p) => {
         const odp = odpowiedzi[p.id];
-        const userOdp = formatujOdpowiedz(p, odp, teamNazwa);
-        const correct = formatujPoprawna(p, teamNazwa);
+        const opcjePyt = opcjeMap?.[p.id] || [];
+        const userOdp = formatujOdpowiedz(p, odp, teamNazwa, opcjePyt);
+        const correct = formatujPoprawna(p, teamNazwa, opcjePyt);
+        const maxPkt = maxPunkty(p, opcjePyt);
         return (
           <li
             key={p.id}
@@ -126,7 +148,7 @@ function ListaTylkoOdczyt({ pytania, odpowiedzi, teams }) {
           >
             <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-base font-semibold text-emerald-50">{p.text}</h3>
-              <span className="text-xs text-emerald-300/70">{p.max_points} pkt</span>
+              <span className="text-xs text-emerald-300/70">do {maxPkt} pkt</span>
             </div>
             {p.description && (
               <p className="mb-2 text-sm text-emerald-200/70">{p.description}</p>
@@ -147,7 +169,7 @@ function ListaTylkoOdczyt({ pytania, odpowiedzi, teams }) {
                   <div className="flex flex-wrap gap-2">
                     <dt className="text-emerald-300/70">Punkty:</dt>
                     <dd className="font-semibold">
-                      {odp?.points ?? 0} / {p.max_points}
+                      {odp?.points ?? 0} / {maxPkt}
                     </dd>
                   </div>
                 </>
@@ -165,7 +187,7 @@ function ListaTylkoOdczyt({ pytania, odpowiedzi, teams }) {
   );
 }
 
-function formatujOdpowiedz(pytanie, odp, teamNazwa) {
+function formatujOdpowiedz(pytanie, odp, teamNazwa, opcje) {
   if (!odp) return null;
   if (pytanie.question_type === 'team') {
     return odp.answer_team_id ? teamNazwa(odp.answer_team_id) : null;
@@ -175,10 +197,24 @@ function formatujOdpowiedz(pytanie, odp, teamNazwa) {
     if (odp.answer_boolean === false) return 'Nie';
     return null;
   }
+  if (
+    pytanie.question_type === 'dropdown_weighted' ||
+    pytanie.question_type === 'boolean_weighted' ||
+    pytanie.question_type === 'dropdown_other'
+  ) {
+    if (odp.answer_other_flag) {
+      return odp.answer_text ? `Inny: ${odp.answer_text}` : 'Inny';
+    }
+    if (odp.selected_option_id) {
+      const opcja = (opcje || []).find((o) => o.id === odp.selected_option_id);
+      return opcja?.opcja_text || odp.answer_text || null;
+    }
+    return odp.answer_text || null;
+  }
   return odp.answer_text || null;
 }
 
-function formatujPoprawna(pytanie, teamNazwa) {
+function formatujPoprawna(pytanie, teamNazwa, opcje) {
   if (pytanie.question_type === 'team') {
     return pytanie.correct_team_id ? teamNazwa(pytanie.correct_team_id) : null;
   }
@@ -187,5 +223,30 @@ function formatujPoprawna(pytanie, teamNazwa) {
     if (pytanie.correct_boolean === false) return 'Nie';
     return null;
   }
+  if (
+    pytanie.question_type === 'dropdown_weighted' ||
+    pytanie.question_type === 'boolean_weighted' ||
+    pytanie.question_type === 'dropdown_other'
+  ) {
+    const poprawna = (opcje || []).find((o) => o.is_correct);
+    return poprawna?.opcja_text || null;
+  }
   return pytanie.correct_answer || null;
+}
+
+// Maks. liczba punktów do zdobycia w pytaniu. Dla typów ważonych
+// to max z punktów po opcjach (różne za różne odpowiedzi).
+function maxPunkty(pytanie, opcje) {
+  if (
+    pytanie.question_type === 'dropdown_weighted' ||
+    pytanie.question_type === 'boolean_weighted' ||
+    pytanie.question_type === 'dropdown_other'
+  ) {
+    const maks = (opcje || []).reduce(
+      (acc, o) => (o.punkty > acc ? o.punkty : acc),
+      0,
+    );
+    return maks || pytanie.max_points;
+  }
+  return pytanie.max_points;
 }

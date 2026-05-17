@@ -3,13 +3,28 @@
 
 const OPCJE = [
   {
+    value: 'dropdown_weighted',
+    label: 'Dropdown ważony',
+    desc: 'Lista opcji z różnymi punktami per opcja. Rozliczanie automatyczne — punkty z opcji oznaczonej jako poprawna.',
+  },
+  {
+    value: 'boolean_weighted',
+    label: 'Tak / Nie ważone',
+    desc: 'Tak vs Nie, różne punkty za każdą odpowiedź (2 opcje: TAK i NIE).',
+  },
+  {
+    value: 'dropdown_other',
+    label: 'Dropdown z opcją „Inny”',
+    desc: 'Lista opcji + pole tekstowe „Inny”. Trafienie z listy automatycznie; „Inny” ręcznie.',
+  },
+  {
     value: 'team',
-    label: 'Wybór drużyny',
+    label: 'Wybór drużyny (stary)',
     desc: 'Rozliczane automatycznie po wpisaniu poprawnej drużyny przez admina.',
   },
   {
     value: 'boolean',
-    label: 'Tak / Nie',
+    label: 'Tak / Nie (stary)',
     desc: 'Rozliczane automatycznie po wpisaniu poprawnej odpowiedzi.',
   },
   {
@@ -26,7 +41,7 @@ const OPCJE = [
 
 export default function SelectTypPytania({
   name = 'question_type',
-  defaultValue = 'team',
+  defaultValue = 'dropdown_weighted',
   value,
   onChange,
 }) {

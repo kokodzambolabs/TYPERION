@@ -11,6 +11,9 @@ const TYPY_LABEL = {
   boolean: 'Tak/Nie',
   text: 'Tekst',
   number: 'Liczba',
+  dropdown_weighted: 'Dropdown ważony',
+  boolean_weighted: 'Tak/Nie ważone',
+  dropdown_other: 'Dropdown + Inny',
 };
 
 export default function KartaPytaniaAdmin({
@@ -23,7 +26,13 @@ export default function KartaPytaniaAdmin({
     : statusBonusow === 'closed'
       ? 'closed'
       : 'open';
-  const reczne = pytanie.question_type === 'text' || pytanie.question_type === 'number';
+  // text/number rozliczane są w całości ręcznie. dropdown_other ma
+  // częściowo automatyczne rozliczanie, ale "Inny" wymaga ręcznego wpisu
+  // punktów - dlatego ten typ też pokazuje przycisk "Rozlicz".
+  const reczne =
+    pytanie.question_type === 'text' ||
+    pytanie.question_type === 'number' ||
+    pytanie.question_type === 'dropdown_other';
 
   return (
     <div className="rounded-xl border border-emerald-900/40 bg-emerald-900/20 p-4">
