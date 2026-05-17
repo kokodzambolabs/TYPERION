@@ -55,6 +55,25 @@ function IkonaCheck({ className = 'h-5 w-5' }) {
   );
 }
 
+function IkonaPencil({ className = 'h-5 w-5' }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
 function IkonaSpinner({ className = 'h-5 w-5' }) {
   return (
     <svg
@@ -77,8 +96,23 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, opcje, isOpen }) {
   const [state, action, pending] = useActionState(zapiszOdpowiedzBonusowa, null);
   const zapisany = state?.ok && !state?.error;
 
+  // Odpowiedź istnieje, jeśli była już w bazie (poczatkowa) ALBO właśnie
+  // przeszedł udany zapis. Wtedy przycisk przełącza się z zielonego ✓
+  // (zapisz) na żółty ołówek (edytuj) — analogicznie do KartaMeczu.jsx.
+  const maOdpowiedz = !!poczatkowa || zapisany;
+
   // Dla dropdown_other potrzebujemy stanu czy user wybrał "Inny".
-  const [isOther, setIsOther] = useState(!!poczatkowa?.answer_other_flag);
+  // Migracja: starsze odpowiedzi mogły wskazywać DB-ową opcję "Inny"
+  // (z czasów gdy UI renderowało dwa źródła) - traktujemy je jako "Inny"
+  // i przepinamy na sentinel, żeby user mógł dopisać tekst.
+  const [isOther, setIsOther] = useState(() => {
+    if (poczatkowa?.answer_other_flag) return true;
+    if (poczatkowa?.selected_option_id) {
+      const wybrana = opcje.find((o) => o.id === poczatkowa.selected_option_id);
+      if (wybrana?.opcja_text?.toUpperCase() === 'INNY') return true;
+    }
+    return false;
+  });
 
   // Maks. punkty: dla pytań ważonych to max z punkty opcji.
   const maxPkt = (() => {
@@ -128,11 +162,21 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, opcje, isOpen }) {
           <button
             type="submit"
             disabled={!isOpen || pending}
-            title="Zapisz odpowiedź"
-            aria-label="Zapisz odpowiedź"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-emerald-600 text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            title={maOdpowiedz ? 'Zaktualizuj odpowiedź' : 'Zapisz odpowiedź'}
+            aria-label={maOdpowiedz ? 'Zaktualizuj odpowiedź' : 'Zapisz odpowiedź'}
+            className={`inline-flex h-10 w-10 items-center justify-center rounded-md text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60 ${
+              maOdpowiedz
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
           >
-            {pending ? <IkonaSpinner /> : <IkonaCheck />}
+            {pending ? (
+              <IkonaSpinner />
+            ) : maOdpowiedz ? (
+              <IkonaPencil />
+            ) : (
+              <IkonaCheck />
+            )}
           </button>
           {zapisany && (
             <span
@@ -243,7 +287,7 @@ function PoleOdpowiedzi({
         <option value="">— wybierz —</option>
         {opcje.map((o) => (
           <option key={o.id} value={o.id}>
-            {o.opcja_text}
+            {o.opcja_text} ({o.punkty} pkt)
           </option>
         ))}
       </select>
@@ -268,7 +312,7 @@ function PoleOdpowiedzi({
               disabled={disabled}
               className="h-4 w-4 accent-emerald-500"
             />
-            Tak
+            Tak <span className="text-emerald-300/70">({taj.punkty} pkt)</span>
           </label>
         )}
         {nie && (
@@ -281,7 +325,7 @@ function PoleOdpowiedzi({
               disabled={disabled}
               className="h-4 w-4 accent-emerald-500"
             />
-            Nie
+            Nie <span className="text-emerald-300/70">({nie.punkty} pkt)</span>
           </label>
         )}
       </div>
@@ -289,6 +333,13 @@ function PoleOdpowiedzi({
   }
 
   if (pytanie.question_type === 'dropdown_other') {
+    // Sentinel "__other__" jest jedynym źródłem opcji "Inny" — filtrujemy
+    // ewentualną DB-ową opcję o nazwie "Inny" (kolejnosc=99), żeby nie
+    // pojawiła się drugi raz. Z tego samego powodu poczatkowa wskazująca
+    // na tę opcję jest powyżej traktowana jak isOther=true (migracja).
+    const opcjeBezInny = opcje.filter(
+      (o) => o.opcja_text?.toUpperCase() !== 'INNY',
+    );
     return (
       <div className="space-y-2">
         <select
@@ -300,15 +351,18 @@ function PoleOdpowiedzi({
           className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"
         >
           <option value="">— wybierz —</option>
-          {opcje.map((o) => (
+          {opcjeBezInny.map((o) => (
             <option key={o.id} value={o.id}>
-              {o.opcja_text}
+              {o.opcja_text} ({o.punkty} pkt)
             </option>
           ))}
           <option value="__other__">Inny…</option>
         </select>
         <input type="hidden" name="isOther" value={isOther ? 'true' : 'false'} />
         {isOther && (
+          // Neutralna (emerald) ramka — wcześniej amber wyglądał jak błąd
+          // walidacji podczas pisania. Walidację pustego pola robi server
+          // action i pokazuje komunikat pod formularzem.
           <input
             type="text"
             name="answerText"
@@ -316,7 +370,7 @@ function PoleOdpowiedzi({
             placeholder="Wpisz własną odpowiedź"
             defaultValue={poczatkowa?.answer_other_flag ? (poczatkowa?.answer_text ?? '') : ''}
             disabled={disabled}
-            className="h-10 w-full rounded-md border border-amber-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-amber-400 focus:outline-none disabled:opacity-60"
+            className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"
           />
         )}
       </div>
