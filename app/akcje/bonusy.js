@@ -662,6 +662,139 @@ export async function zapiszOdpowiedzBonusowa(_prev, formData) {
   return { ok: 'Zapisano.', savedAt: Date.now() };
 }
 
+// Pobiera CUDZE odpowiedzi bonusowe dla pojedynczego pytania - dla sekcji
+// "Zobacz odpowiedzi innych" na /bonusy. Wzorowane 1:1 na pobierzCudzeTypy
+// z app/akcje/typy.js. Wywoływane lazy: dopiero po kliknięciu togglera,
+// żeby nie wisieć z N zapytaniami na liście wszystkich pytań.
+//
+// Widoczność rządzi się tournament_settings.bonuses_close_at:
+//   - now() <= bonuses_close_at -> błąd "jeszcze zamknięte"
+//     (RLS i tak by odrzuciło SELECT, ale chcemy ładny polski komunikat)
+//   - now() >  bonuses_close_at -> zwracamy listę (RLS pozwala)
+//
+// Filtrowanie botów:
+//   - bot_ukryty=true: SERVER-SIDE wycięte z listy dla zwykłych userów
+//     (admin widzi wszystko, identycznie jak w pobierzCudzeTypy)
+//   - is_bot=true bez bot_ukryty: zostawiamy w wyniku, ale dorzucamy
+//     flagę isBot - klient ma odfiltrować po stronie przeglądarki przez
+//     useUkryjAI (ten sam wzorzec co cudze typy meczowe)
+//
+// Zwraca surowe pola odpowiedzi (answer_text, answer_team_id, answer_boolean,
+// selected_option_id, answer_other_flag, points) - formatowanie do
+// czytelnego tekstu robi klient, bo i tak ma już pod ręką dane pytania,
+// opcje i drużyny (z renderu listy).
+const SchematCudzychOdp = z.object({
+  questionId: z.coerce.number().int().positive(),
+});
+
+export async function pobierzCudzeOdpowiedziBonusowe(args) {
+  const parsed = SchematCudzychOdp.safeParse(args);
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { questionId } = parsed.data;
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: 'Brak sesji - zaloguj się ponownie.' };
+
+  // Defense in depth: RLS już to zablokuje, ale dla jasnego komunikatu po
+  // polsku weryfikujemy bonuses_close_at po stronie serwera.
+  const { data: settings, error: sE } = await supabase
+    .from('tournament_settings')
+    .select('bonuses_close_at')
+    .eq('id', 1)
+    .single();
+  if (sE || !settings) return { error: 'Brak ustawień turnieju.' };
+  if (new Date(settings.bonuses_close_at) > new Date()) {
+    return {
+      error:
+        'Odpowiedzi innych zobaczysz po zamknięciu typowania bonusów.',
+    };
+  }
+
+  // Sprawdź, że pytanie istnieje (i przy okazji weź is_settled - klient pokaże
+  // punkty tylko gdy pytanie rozliczone).
+  const { data: pytanie, error: pytE } = await supabase
+    .from('bonus_questions')
+    .select('id, is_settled')
+    .eq('id', questionId)
+    .single();
+  if (pytE || !pytanie) return { error: 'Pytanie nie istnieje.' };
+
+  // Dwa osobne zapytania zamiast JOIN-a: bonus_answers.user_id i profiles.id
+  // oba wskazują na auth.users.id, ale Supabase nie zna tej relacji
+  // (brak FK bonus_answers -> profiles), więc embed by sypał błędem
+  // "Could not find a relationship". Mergujemy po stronie JS - ten sam
+  // wzorzec co w pobierzCudzeTypy.
+  const { data: odpowiedzi, error: odpE } = await supabase
+    .from('bonus_answers')
+    .select(
+      'user_id, answer_text, answer_team_id, answer_boolean, selected_option_id, answer_other_flag, points',
+    )
+    .eq('question_id', questionId);
+  if (odpE) return { error: odpE.message };
+  if (!odpowiedzi || odpowiedzi.length === 0) {
+    return { ok: true, isSettled: pytanie.is_settled, odpowiedzi: [] };
+  }
+
+  const userIds = odpowiedzi.map((o) => o.user_id);
+  const { data: profiles, error: profE } = await supabase
+    .from('profiles')
+    .select('id, nick, is_bot, bot_ukryty')
+    .in('id', userIds);
+  if (profE) return { error: profE.message };
+
+  // Admin widzi cudze odpowiedzi ukrytych botów - dla zwykłych userów
+  // wypadają z listy całkowicie.
+  const { data: jaProfil } = await supabase
+    .from('profiles')
+    .select('is_admin')
+    .eq('id', user.id)
+    .single();
+  const jestAdmin = !!jaProfil?.is_admin;
+
+  const profilMap = new Map();
+  for (const p of profiles || []) {
+    profilMap.set(p.id, p);
+  }
+
+  // Sort: malejąco po points (NULL na koniec - jeszcze nierozliczone),
+  // potem alfabetycznie po nicku. Własną odpowiedź usera filtrujemy -
+  // na liście pytań widzi ją osobno ("Twoja odpowiedź"), duplikat tylko
+  // by zaśmiecał (tak samo jak przy cudzych typach meczowych).
+  const lista = odpowiedzi
+    .filter((o) => o.user_id !== user.id)
+    .filter((o) => {
+      if (jestAdmin) return true;
+      const prof = profilMap.get(o.user_id);
+      return !prof?.bot_ukryty;
+    })
+    .map((o) => {
+      const prof = profilMap.get(o.user_id);
+      return {
+        userId: o.user_id,
+        nick: prof?.nick || 'Anonim',
+        isBot: !!prof?.is_bot,
+        botUkryty: !!prof?.bot_ukryty,
+        answerText: o.answer_text ?? null,
+        answerTeamId: o.answer_team_id ?? null,
+        answerBoolean: o.answer_boolean ?? null,
+        selectedOptionId: o.selected_option_id ?? null,
+        answerOtherFlag: !!o.answer_other_flag,
+        points: o.points ?? null,
+      };
+    })
+    .sort((a, b) => {
+      const ap = a.points ?? -1;
+      const bp = b.points ?? -1;
+      if (ap !== bp) return bp - ap;
+      return a.nick.localeCompare(b.nick, 'pl');
+    });
+
+  return { ok: true, isSettled: pytanie.is_settled, odpowiedzi: lista };
+}
+
 export async function oznaczPytanieRozliczone(id) {
   const auth = await sprawdzAdmina();
   if (auth.error) return auth;
