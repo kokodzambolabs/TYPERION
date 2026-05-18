@@ -29,11 +29,11 @@ export default async function RankingPage() {
     .single();
   const jestAdmin = !!jaProfil?.is_admin;
 
-  const profileQuery = supabase.from('profiles').select('id, nick, is_bot, bot_ukryty');
+  let profileQuery = supabase.from('profiles').select('id, nick, is_bot, bot_ukryty');
   // Dla nie-adminów filtrujemy ukryte boty od razu na bazie - inaczej
   // wpadałyby do liczonych sum i numeracji.
   if (!jestAdmin) {
-    profileQuery.eq('bot_ukryty', false);
+    profileQuery = profileQuery.eq('bot_ukryty', false);
   }
 
   const [{ data: profile }, { data: bonusy }, { data: mecze }] = await Promise.all([

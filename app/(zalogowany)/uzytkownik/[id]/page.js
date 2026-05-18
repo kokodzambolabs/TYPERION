@@ -52,9 +52,9 @@ export default async function ProfilUzytkownikaPage({ params }) {
 
   // Ranking: ten sam algorytm co /ranking - 3 SELECT-y i merge w JS.
   // Dla nie-adminów ukryte boty wypadają z liczonej puli (jak na /ranking).
-  const profileQuery = supabase.from('profiles').select('id, nick, bot_ukryty');
+  let profileQuery = supabase.from('profiles').select('id, nick, bot_ukryty');
   if (!jestAdmin) {
-    profileQuery.eq('bot_ukryty', false);
+    profileQuery = profileQuery.eq('bot_ukryty', false);
   }
 
   const [{ data: profile }, { data: bonusy }, { data: meczeRanking }] =
