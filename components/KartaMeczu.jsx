@@ -30,6 +30,7 @@ import { formatujDateKrotkoPL, formatGrupa } from '@/lib/format';
 import { getFlashscoreUrl } from '@/lib/competitions';
 import { zapiszTyp, pobierzCudzeTypy } from '@/app/akcje/typy';
 import { useUkryjAI } from '@/lib/hooks/useUkryjAI';
+import { czyPucharowy, etykietaEtapu } from '@/lib/helpers/etapMeczu';
 
 export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
   const home = mecz.home_team?.name || `#${mecz.home_team_id}`;
@@ -85,6 +86,8 @@ export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
           away={away}
           grupaEtykieta={grupaEtykieta}
           flashscoreUrl={flashscoreUrl}
+          pucharowy={czyPucharowy(mecz.group_name)}
+          etykietaPucharu={etykietaEtapu(mecz.group_name)}
         />
       )}
 
@@ -108,6 +111,7 @@ export default function KartaMeczu({ mecz, typ, stan, anchorId }) {
           pending={pendingCudze}
           blad={bladCudze}
           typy={widoczneCudze}
+          mecz={mecz}
         />
       )}
     </div>
@@ -214,25 +218,39 @@ function IkonaSpinner({ className = 'h-5 w-5' }) {
 // Layout (scheduled): [meta] [DrużynaA | inputy | DrużynaB] [F | Zapisz]
 // Mobile: meta + akcje na górze, centrum (drużyny+inputy) zwija się
 // na drugą linię przez basis-full + order.
+// Pucharowy: dropdown "Kto awansuje?" gdy remis w 90min.
 // ---------------------------------------------------------------------
-function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) {
+function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pucharowy, etykietaPucharu }) {
   const [state, action, pending] = useActionState(zapiszTyp, null);
 
-  // Wynik akcji ma pierwszeństwo - tak gwarantujemy natychmiastowy update
-  // UI, bez czekania na revalidatePath.
   const aktualnyTyp = (state?.ok && state?.typ) ? state.typ : (typ ?? null);
-
-  // key na inputach - po zapisie defaultValue ma się "odświeżyć"
-  // (uncontrolled input nie reaguje na zmianę defaultValue, dopóki
-  // się nie przemontuje).
   const inputKey = `${aktualnyTyp?.home_score ?? ''}-${aktualnyTyp?.away_score ?? ''}`;
+
+  // Śledź bieżące wartości formularza gdy pucharowy
+  const [localHome, setLocalHome] = useState(aktualnyTyp?.home_score ?? '');
+  const [localAway, setLocalAway] = useState(aktualnyTyp?.away_score ?? '');
+  const [winnerId, setWinnerId] = useState(aktualnyTyp?.winner_team_id ?? null);
+
+  // Reset local state gdy typ się zmieni (po zapisie)
+  if (aktualnyTyp && (Number(localHome) !== aktualnyTyp.home_score || Number(localAway) !== aktualnyTyp.away_score)) {
+    setLocalHome(aktualnyTyp.home_score);
+    setLocalAway(aktualnyTyp.away_score);
+    setWinnerId(aktualnyTyp.winner_team_id ?? null);
+  }
+
+  const pokazDropdown = pucharowy && localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
 
   return (
     <form action={action}>
       <input type="hidden" name="matchId" value={mecz.id} />
+      <input type="hidden" name="winnerId" value={winnerId ?? ''} />
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:flex-nowrap">
         <Meta kickoff={mecz.kickoff_at} grupaEtykieta={grupaEtykieta} live={false} />
+
+        {pucharowy && etykietaPucharu && (
+          <span className="text-xs font-semibold text-emerald-300 italic">{etykietaPucharu}</span>
+        )}
 
         <div className="order-3 flex w-full min-w-0 items-center gap-2 sm:order-none sm:w-auto sm:flex-1">
           <span
@@ -252,6 +270,7 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) 
               required
               defaultValue={aktualnyTyp?.home_score ?? ''}
               placeholder="—"
+              onChange={(e) => setLocalHome(e.target.value)}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
               aria-label={`Typ ${home}`}
             />
@@ -266,6 +285,7 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) 
               required
               defaultValue={aktualnyTyp?.away_score ?? ''}
               placeholder="—"
+              onChange={(e) => setLocalAway(e.target.value)}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
               aria-label={`Typ ${away}`}
             />
@@ -318,13 +338,32 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl }) 
         </div>
       </div>
 
+      {pokazDropdown && (
+        <div className="mt-2 space-y-1">
+          <label className="block text-xs font-semibold text-emerald-200">
+            Kto awansuje?
+          </label>
+          <select
+            name="winnerId"
+            value={winnerId ?? ''}
+            onChange={(e) => setWinnerId(e.target.value ? Number(e.target.value) : null)}
+            required
+            className="w-full rounded-md border border-emerald-600/60 bg-emerald-950/60 px-2 py-1.5 text-sm text-emerald-50 focus:border-emerald-400 focus:outline-none"
+          >
+            <option value="">— wybierz drużynę —</option>
+            <option value={mecz.home_team_id}>{home}</option>
+            <option value={mecz.away_team_id}>{away}</option>
+          </select>
+          <p className="text-xs text-emerald-300/70">
+            Awansująca drużyna = +1 pkt jeśli trafisz
+          </p>
+        </div>
+      )}
+
       {state?.error && (
         <p className="mt-1 text-xs text-rose-300">{state.error}</p>
       )}
       {state?.ok && !state?.error && (
-        // key={state.savedAt} -> nowy element przy każdym kolejnym sukcesie =>
-        // animacja CSS startuje od początku (gaśnie po 2s). Bez savedAt klucz
-        // stringifikował się do "[object Object]" i animacja leciała tylko raz.
         <p
           key={state.savedAt}
           className="flash-zapisano sr-only mt-1 text-xs font-semibold text-emerald-300"
@@ -394,7 +433,7 @@ function RzadGotowy({
       </div>
 
       <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2 sm:ml-0 sm:flex-nowrap">
-        <TypInline typ={typ} stan={stan} />
+        <TypInline typ={typ} stan={stan} mecz={mecz} />
         <PrzyciskFlashscore url={flashscoreUrl} />
         {przelaczCudze && (
           <button
@@ -420,7 +459,7 @@ function RzadGotowy({
 }
 
 // "Typ: X:Y" + ewentualnie BadgePunktow (finished). Inline w prawej kolumnie.
-function TypInline({ typ, stan }) {
+function TypInline({ typ, stan, mecz }) {
   if (!typ) {
     return (
       <span
@@ -433,8 +472,21 @@ function TypInline({ typ, stan }) {
     );
   }
 
+  const pucharowy = mecz && czyPucharowy(mecz.group_name);
+  const remis = typ.home_score === typ.away_score;
+  const pokazAwans = pucharowy && remis && typ.winner_team_id != null && stan === 'finished';
+
+  let winnerTeamName = null;
+  if (pokazAwans && mecz) {
+    if (typ.winner_team_id === mecz.home_team_id) {
+      winnerTeamName = mecz.home_team?.name || `#${mecz.home_team_id}`;
+    } else if (typ.winner_team_id === mecz.away_team_id) {
+      winnerTeamName = mecz.away_team?.name || `#${mecz.away_team_id}`;
+    }
+  }
+
   return (
-    <span className="flex items-center gap-1.5 whitespace-nowrap text-xs">
+    <span className="flex flex-col items-end gap-1.5 whitespace-nowrap text-xs">
       <span className={stan === 'live' ? 'text-amber-200/80' : 'text-emerald-200/80'}>
         Typ:{' '}
         <span
@@ -443,6 +495,11 @@ function TypInline({ typ, stan }) {
           {typ.home_score}:{typ.away_score}
         </span>
       </span>
+      {pokazAwans && winnerTeamName && (
+        <span className="text-emerald-300/80">
+          awans: <span className="font-semibold">{winnerTeamName}</span>
+        </span>
+      )}
       {stan === 'finished' &&
         (typ.points != null ? (
           <BadgePunktow punkty={typ.points} />

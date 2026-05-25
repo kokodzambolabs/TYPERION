@@ -18,7 +18,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 import { sprawdzAdmina } from '@/lib/admin';
-import { policzPunkty } from '@/lib/punktacja';
+import { policzPunktyMeczu as policzPunktyNowy } from '@/lib/punktacja';
 
 const SchematWyniku = z.object({
   matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
@@ -46,7 +46,7 @@ export async function policzPunktyMeczu(matchId) {
 
   const { data: mecz, error: meczE } = await auth.supabase
     .from('matches')
-    .select('id, home_score, away_score')
+    .select('id, home_score, away_score, group_name, home_team_id, away_team_id, full_time_home_score, full_time_away_score, winner_team_id')
     .eq('id', id)
     .single();
   if (meczE || !mecz) return { error: 'Mecz nie istnieje.' };
@@ -56,7 +56,7 @@ export async function policzPunktyMeczu(matchId) {
 
   const { data: typy, error: typyE } = await auth.supabase
     .from('predictions')
-    .select('id, home_score, away_score')
+    .select('id, home_score, away_score, winner_team_id')
     .eq('match_id', id);
   if (typyE) return { error: typyE.message };
 
@@ -67,17 +67,15 @@ export async function policzPunktyMeczu(matchId) {
     return { ok: 0 };
   }
 
-  const wynik = { home: mecz.home_score, away: mecz.away_score };
-
   // UPDATE pojedynczo - w Supabase nie ma czystego "bulk update z różnymi
   // wartościami per wiersz". Można by zrobić upsert całej listy z
   // onConflict, ale wtedy musielibyśmy podać user_id/match_id - bezpieczniej
   // walnąć N małych UPDATE-ów (transakcja każdy z osobna jest OK,
   // bo pole points to tylko wynik czystej funkcji punktacji).
   const updates = typy.map((t) => {
-    const punkty = policzPunkty(
-      { home: t.home_score, away: t.away_score },
-      wynik,
+    const punkty = policzPunktyNowy(
+      { home_score: t.home_score, away_score: t.away_score, winner_team_id: t.winner_team_id },
+      mecz,
     );
     return auth.supabase
       .from('predictions')

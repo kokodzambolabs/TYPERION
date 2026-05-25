@@ -10,20 +10,26 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { createClient } from '@/lib/supabase/server';
 import { klasyfikujMecze } from '@/lib/klasyfikacjaMeczow';
+import { czyPucharowy } from '@/lib/helpers/etapMeczu';
 
-const SchematTypu = z.object({
-  matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
-  homeScore: z.coerce
-    .number()
-    .int({ message: 'Wynik musi być liczbą całkowitą.' })
-    .min(0, { message: 'Wynik nie może być ujemny.' })
-    .max(20, { message: 'Wynik max 20.' }),
-  awayScore: z.coerce
-    .number()
-    .int({ message: 'Wynik musi być liczbą całkowitą.' })
-    .min(0, { message: 'Wynik nie może być ujemny.' })
-    .max(20, { message: 'Wynik max 20.' }),
-});
+const SchematTypu = z
+  .object({
+    matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
+    homeScore: z.coerce
+      .number()
+      .int({ message: 'Wynik musi być liczbą całkowitą.' })
+      .min(0, { message: 'Wynik nie może być ujemny.' })
+      .max(20, { message: 'Wynik max 20.' }),
+    awayScore: z.coerce
+      .number()
+      .int({ message: 'Wynik musi być liczbą całkowitą.' })
+      .min(0, { message: 'Wynik nie może być ujemny.' })
+      .max(20, { message: 'Wynik max 20.' }),
+    winnerId: z.coerce.number().int().nullable().optional().default(null),
+  })
+  .superRefine(async (data, ctx) => {
+    // ctx nie ma dostępu do supabase bezpośrednio - będziemy walidować w action
+  });
 
 export async function zapiszTyp(_prev, formData) {
   const supabase = await createClient();
@@ -37,20 +43,47 @@ export async function zapiszTyp(_prev, formData) {
     matchId: formData.get('matchId'),
     homeScore: formData.get('homeScore'),
     awayScore: formData.get('awayScore'),
+    winnerId: formData.get('winnerId'),
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const { matchId, homeScore, awayScore } = parsed.data;
+  const { matchId, homeScore, awayScore, winnerId } = parsed.data;
 
   const { data: mecz, error: meczE } = await supabase
     .from('matches')
-    .select('id, kickoff_at')
+    .select('id, kickoff_at, group_name, home_team_id, away_team_id')
     .eq('id', matchId)
     .single();
   if (meczE || !mecz) return { error: 'Mecz nie istnieje.' };
 
   if (new Date(mecz.kickoff_at) <= new Date()) {
     return { error: 'Typowanie zamknięte - mecz już się rozpoczął.' };
+  }
+
+  // Walidacja dla fazy pucharowej
+  const pucharowy = czyPucharowy(mecz.group_name);
+  const remis = homeScore === awayScore;
+
+  if (pucharowy && remis) {
+    // Pucharowy + remis → winnerId MUSI być wybrany
+    if (winnerId == null) {
+      return {
+        error: 'Przy remisie w fazie pucharowej musisz wskazać kto awansuje.',
+      };
+    }
+    // winnerId MUSI być jedną z grających drużyn
+    if (winnerId !== mecz.home_team_id && winnerId !== mecz.away_team_id) {
+      return {
+        error: 'Awansująca drużyna musi być jedną z grających.',
+      };
+    }
+  } else {
+    // We wszystkich innych przypadkach winnerId MUSI być null
+    if (winnerId != null) {
+      return {
+        error: 'Wybór awansującego dotyczy tylko remisu w fazie pucharowej.',
+      };
+    }
   }
 
   const teraz = new Date().toISOString();
@@ -62,6 +95,7 @@ export async function zapiszTyp(_prev, formData) {
         match_id: matchId,
         home_score: homeScore,
         away_score: awayScore,
+        winner_team_id: winnerId,
         updated_at: teraz,
       },
       { onConflict: 'user_id,match_id' },
@@ -69,18 +103,9 @@ export async function zapiszTyp(_prev, formData) {
   if (error) return { error: error.message };
 
   revalidatePath('/mecze');
-  // Zwracamy zapisany typ, żeby klient mógł od razu uaktualnić UI
-  // bez czekania na revalidatePath. Bug naprawiony: kiedy user typuje
-  // kolejno kilka meczów, defaultValue inputu pokazywało stary typ
-  // dopóki strona się nie odświeżyła. Teraz lokalny state w KartaMeczu
-  // bierze świeży typ z odpowiedzi Server Action.
   return {
     ok: 'Typ zapisany.',
-    typ: { home_score: homeScore, away_score: awayScore },
-    // Unikalny per wywołanie - klient używa go jako klucza React,
-    // żeby flash "zapisano" replayował się przy każdym kolejnym sukcesie.
-    // Bez tego key={state} stringifikował się do "[object Object]" i React
-    // utrzymywał ten sam DOM node - animacja odpalała się tylko raz.
+    typ: { home_score: homeScore, away_score: awayScore, winner_team_id: winnerId },
     savedAt: Date.now(),
   };
 }
@@ -124,14 +149,9 @@ export async function pobierzCudzeTypy(args) {
     return { error: 'Cudze typy zobaczysz dopiero po rozpoczęciu meczu.' };
   }
 
-  // Dwa osobne zapytania zamiast JOIN-a: predictions.user_id i profiles.id
-  // oba wskazują na auth.users.id, ale Supabase nie zna tej relacji
-  // (brak FK predictions -> profiles), więc embed sypał błędem
-  // "Could not find a relationship between 'predictions' and 'user_id'".
-  // Mergujemy po stronie JS - jeden round-trip więcej, ale działa.
   const { data: predictions, error: predE } = await supabase
     .from('predictions')
-    .select('user_id, home_score, away_score, points')
+    .select('user_id, home_score, away_score, points, winner_team_id')
     .eq('match_id', matchId);
   if (predE) return { error: predE.message };
   if (!predictions || predictions.length === 0) {
@@ -159,9 +179,6 @@ export async function pobierzCudzeTypy(args) {
     profilMap.set(p.id, p);
   }
 
-  // Sort: malejąco po points (NULL na koniec - jeszcze nierozliczone).
-  // Filtrujemy własny typ usera - na karcie meczu jest osobno ("Twój typ"),
-  // więc duplikowanie go w liście "cudzych typów" zaśmieca i myli.
   const lista = predictions
     .filter((p) => p.user_id !== user.id)
     .filter((p) => {
@@ -178,6 +195,7 @@ export async function pobierzCudzeTypy(args) {
         home: p.home_score,
         away: p.away_score,
         points: p.points ?? null,
+        winnerTeamId: p.winner_team_id ?? null,
       };
     })
     .sort((a, b) => {
