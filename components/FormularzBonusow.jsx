@@ -22,16 +22,20 @@ export default function FormularzBonusow({
 }) {
   return (
     <div className="space-y-3">
-      {questions.map((q) => (
-        <PojedynczePytanie
-          key={q.id}
-          pytanie={q}
-          poczatkowa={userAnswers?.[q.id]}
-          teams={teams}
-          opcje={opcjeMap?.[q.id] || []}
-          isOpen={isOpen}
-        />
-      ))}
+      {questions.map((q) => {
+        const a = userAnswers?.[q.id];
+        const reactKey = `${q.id}-${a?.updated_at ?? 'pusta'}`;
+        return (
+          <PojedynczePytanie
+            key={reactKey}
+            pytanie={q}
+            poczatkowa={a}
+            teams={teams}
+            opcje={opcjeMap?.[q.id] || []}
+            isOpen={isOpen}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -114,6 +118,11 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, opcje, isOpen }) {
     return false;
   });
 
+  const [selectedId, setSelectedId] = useState(() => {
+    if (poczatkowa?.answer_other_flag) return '';
+    return poczatkowa?.selected_option_id?.toString() ?? '';
+  });
+
   // Maks. punkty: dla pytań ważonych to max z punkty opcji.
   const maxPkt = (() => {
     if (
@@ -154,6 +163,8 @@ function PojedynczePytanie({ pytanie, poczatkowa, teams, opcje, isOpen }) {
             opcje={opcje}
             isOther={isOther}
             setIsOther={setIsOther}
+            selectedId={selectedId}
+            setSelectedId={setSelectedId}
             disabled={!isOpen || pending}
           />
         </div>
@@ -205,6 +216,8 @@ function PoleOdpowiedzi({
   opcje,
   isOther,
   setIsOther,
+  selectedId,
+  setSelectedId,
   disabled,
 }) {
   if (pytanie.question_type === 'team') {
@@ -343,9 +356,17 @@ function PoleOdpowiedzi({
     return (
       <div className="space-y-2">
         <select
-          // Sentinel "__other__" — przy zmianie na to przełączamy isOther i wysyłamy isOther=true.
-          value={isOther ? '__other__' : (poczatkowa?.selected_option_id ?? '')}
-          onChange={(e) => setIsOther(e.target.value === '__other__')}
+          value={isOther ? '__other__' : selectedId}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === '__other__') {
+              setIsOther(true);
+              setSelectedId('');
+            } else {
+              setIsOther(false);
+              setSelectedId(val);
+            }
+          }}
           name={isOther ? undefined : 'selectedOptionId'}
           disabled={disabled}
           className="h-10 w-full rounded-md border border-emerald-700/60 bg-emerald-950/60 px-3 text-emerald-50 focus:border-emerald-400 focus:outline-none disabled:opacity-60"

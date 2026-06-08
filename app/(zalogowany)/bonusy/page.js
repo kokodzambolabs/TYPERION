@@ -41,7 +41,7 @@ export default async function BonusyPage() {
     supabase
       .from('bonus_answers')
       .select(
-        'id, question_id, answer_team_id, answer_boolean, answer_text, points, selected_option_id, answer_other_flag',
+        'id, question_id, answer_team_id, answer_boolean, answer_text, points, selected_option_id, answer_other_flag, updated_at',
       )
       .eq('user_id', user.id),
     supabase
