@@ -24,7 +24,12 @@ const SchematTypu = z.object({
     .int({ message: 'Wynik musi być liczbą całkowitą.' })
     .min(0, { message: 'Wynik nie może być ujemny.' })
     .max(20, { message: 'Wynik max 20.' }),
-  winnerId: z.coerce.number().int().nullable().optional().default(null),
+  winnerId: z
+    .preprocess(
+      (v) => (v === '' || v == null ? null : v),
+      z.coerce.number().int().nullable()
+    )
+    .default(null),
 });
 
 export async function zapiszTyp(_prev, formData) {
