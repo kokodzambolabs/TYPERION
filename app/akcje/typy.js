@@ -12,24 +12,20 @@ import { createClient } from '@/lib/supabase/server';
 import { klasyfikujMecze } from '@/lib/klasyfikacjaMeczow';
 import { czyPucharowy } from '@/lib/helpers/etapMeczu';
 
-const SchematTypu = z
-  .object({
-    matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
-    homeScore: z.coerce
-      .number()
-      .int({ message: 'Wynik musi być liczbą całkowitą.' })
-      .min(0, { message: 'Wynik nie może być ujemny.' })
-      .max(20, { message: 'Wynik max 20.' }),
-    awayScore: z.coerce
-      .number()
-      .int({ message: 'Wynik musi być liczbą całkowitą.' })
-      .min(0, { message: 'Wynik nie może być ujemny.' })
-      .max(20, { message: 'Wynik max 20.' }),
-    winnerId: z.coerce.number().int().nullable().optional().default(null),
-  })
-  .superRefine(async (data, ctx) => {
-    // ctx nie ma dostępu do supabase bezpośrednio - będziemy walidować w action
-  });
+const SchematTypu = z.object({
+  matchId: z.coerce.number().int().positive({ message: 'Nieprawidłowy mecz.' }),
+  homeScore: z.coerce
+    .number()
+    .int({ message: 'Wynik musi być liczbą całkowitą.' })
+    .min(0, { message: 'Wynik nie może być ujemny.' })
+    .max(20, { message: 'Wynik max 20.' }),
+  awayScore: z.coerce
+    .number()
+    .int({ message: 'Wynik musi być liczbą całkowitą.' })
+    .min(0, { message: 'Wynik nie może być ujemny.' })
+    .max(20, { message: 'Wynik max 20.' }),
+  winnerId: z.coerce.number().int().nullable().optional().default(null),
+});
 
 export async function zapiszTyp(_prev, formData) {
   const supabase = await createClient();
