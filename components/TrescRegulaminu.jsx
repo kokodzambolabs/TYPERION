@@ -15,14 +15,14 @@ export default function TrescRegulaminu() {
         </p>
         <p className="mb-2 leading-relaxed">
           Przykładowy mecz{' '}
-          <span className="font-semibold text-emerald-50">Polska – Niemcy 3:1</span>.
+          <span className="font-semibold text-emerald-50">Polska – Niemcy 1:1</span>.
           Twoje typy:
         </p>
         <ul className="space-y-1.5 pl-1">
           <li className="flex gap-2">
             <span className="text-emerald-400">•</span>
             <span>
-              Polska – Niemcy <span className="font-semibold text-emerald-50">3:1</span> →{' '}
+              Polska – Niemcy <span className="font-semibold text-emerald-50">1:1</span> →{' '}
               <span className="font-semibold text-emerald-300">3 punkty</span> — idealne
               trafienie
             </span>
@@ -30,24 +30,25 @@ export default function TrescRegulaminu() {
           <li className="flex gap-2">
             <span className="text-emerald-400">•</span>
             <span>
-              Polska – Niemcy <span className="font-semibold text-emerald-50">2:0</span> →{' '}
+              Polska – Niemcy <span className="font-semibold text-emerald-50">2:2</span> →{' '}
               <span className="font-semibold text-emerald-300">2 punkty</span> — trafiony
-              zwycięzca i różnica bramek
+              remis z tą samą różnicą bramek
             </span>
           </li>
           <li className="flex gap-2">
             <span className="text-emerald-400">•</span>
             <span>
-              Polska – Niemcy <span className="font-semibold text-emerald-50">5:0</span> →{' '}
-              <span className="font-semibold text-emerald-300">1 punkt</span> — trafiony
-              tylko zwycięzca
+              Polska – Niemcy <span className="font-semibold text-emerald-50">0:0</span> →{' '}
+              <span className="font-semibold text-emerald-300">2 punkty</span> — trafiony
+              remis z tą samą różnicą bramek
             </span>
           </li>
           <li className="flex gap-2">
             <span className="text-emerald-400">•</span>
             <span>
-              Polska – Niemcy <span className="font-semibold text-emerald-50">0:1</span> →{' '}
-              <span className="font-semibold text-emerald-300">0 punktów</span> — pudło
+              Polska – Niemcy <span className="font-semibold text-emerald-50">2:1</span> →{' '}
+              <span className="font-semibold text-emerald-300">0 punktów</span> — pudło (nie
+              remis)
             </span>
           </li>
         </ul>
