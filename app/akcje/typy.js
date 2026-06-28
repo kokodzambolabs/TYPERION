@@ -262,7 +262,7 @@ export async function pobierzWiecejMeczow(args) {
   if (ids.length > 0) {
     const { data, error: typyE } = await supabase
       .from('predictions')
-      .select('match_id, home_score, away_score, points')
+      .select('match_id, home_score, away_score, points, winner_team_id, updated_at')
       .eq('user_id', user.id)
       .in('match_id', ids);
     if (typyE) return { error: typyE.message };

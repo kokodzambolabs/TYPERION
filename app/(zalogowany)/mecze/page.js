@@ -43,7 +43,7 @@ export default async function MeczePage() {
       .order('kickoff_at', { ascending: true }),
     supabase
       .from('predictions')
-      .select('match_id, home_score, away_score, points')
+      .select('match_id, home_score, away_score, points, winner_team_id, updated_at')
       .eq('user_id', user.id),
   ]);
 
@@ -202,16 +202,20 @@ function SekcjaStatyczna({ tytul, mecze, typyMap, stan }) {
         </span>
       </h2>
       <ul className="space-y-2">
-        {mecze.map((m) => (
-          <li key={m.id}>
-            <KartaMeczu
-              mecz={m}
-              typ={typyMap.get(m.id)}
-              stan={stan}
-              anchorId={`match-${m.id}`}
-            />
-          </li>
-        ))}
+        {mecze.map((m) => {
+          const t = typyMap.get(m.id);
+          return (
+            <li key={m.id}>
+              <KartaMeczu
+                key={`${m.id}-${t?.updated_at ?? 'pusta'}-${t?.winner_team_id ?? 'x'}`}
+                mecz={m}
+                typ={t}
+                stan={stan}
+                anchorId={`match-${m.id}`}
+              />
+            </li>
+          );
+        })}
       </ul>
     </section>
   );
