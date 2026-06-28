@@ -23,7 +23,7 @@
 // świeży typ - state z action ma pierwszeństwo nad propem; "✓ Zapisano"
 // flashuje przez 2s dzięki CSS keyframes (flash-zapisano w globals.css).
 
-import { useActionState, useEffect, useMemo, useState, useTransition } from 'react';
+import { useActionState, useMemo, useState, useTransition } from 'react';
 import BadgePunktow from './BadgePunktow';
 import PanelCudzychTypow from './SekcjaCudzychTypow';
 import { formatujDateKrotkoPL, formatGrupa } from '@/lib/format';
@@ -250,14 +250,12 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
     localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
   const pokazDropdown = pucharowy && remis;
 
-  // Gdy wynik przestaje być remisem, czyścimy wybór awansującego - inaczej
-  // ukryty hidden input trzymałby starą wartość winner_team_id i server
-  // odrzucałby zapis ("Wybór awansującego dotyczy tylko remisu...").
-  useEffect(() => {
-    if (!remis && winnerId !== null) {
-      setWinnerId(null);
-    }
-  }, [remis, winnerId]);
+  // Wybór awansującego czyścimy BEZPOŚREDNIO w onChange inputów wyniku (gdy
+  // zmiana usera sprawia, że przestaje być remis) - patrz niżej. NIE robimy
+  // tego reaktywnie przez useEffect: po Server Action + revalidatePath
+  // następuje re-render, w którym `remis` mógł chwilowo policzyć się jako
+  // false (timing synchronizacji local state), co zerowało winnerId mimo że
+  // to nadal remis (BUG: znikał wybór "Kto awansuje?" po zapisie).
 
   return (
     <form action={action}>
@@ -288,7 +286,14 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
               required
               value={localHome}
               placeholder="—"
-              onChange={(e) => setLocalHome(e.target.value)}
+              onChange={(e) => {
+                const nowa = e.target.value;
+                setLocalHome(nowa);
+                // jeśli po zmianie przestaje być remis, czyść awansującego
+                const nadalRemis =
+                  nowa !== '' && localAway !== '' && Number(nowa) === Number(localAway);
+                if (!nadalRemis) setWinnerId(null);
+              }}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
               aria-label={`Typ ${home}`}
             />
@@ -302,7 +307,13 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
               required
               value={localAway}
               placeholder="—"
-              onChange={(e) => setLocalAway(e.target.value)}
+              onChange={(e) => {
+                const nowa = e.target.value;
+                setLocalAway(nowa);
+                const nadalRemis =
+                  localHome !== '' && nowa !== '' && Number(localHome) === Number(nowa);
+                if (!nadalRemis) setWinnerId(null);
+              }}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
               aria-label={`Typ ${away}`}
             />
