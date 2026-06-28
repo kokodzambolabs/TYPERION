@@ -224,32 +224,40 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
   const [state, action, pending] = useActionState(zapiszTyp, null);
 
   const aktualnyTyp = (state?.ok && state?.typ) ? state.typ : (typ ?? null);
-  const inputKey = `${aktualnyTyp?.home_score ?? ''}-${aktualnyTyp?.away_score ?? ''}`;
 
-  // Śledź bieżące wartości formularza gdy pucharowy
-  const [localHome, setLocalHome] = useState(aktualnyTyp?.home_score ?? '');
-  const [localAway, setLocalAway] = useState(aktualnyTyp?.away_score ?? '');
-  const [winnerId, setWinnerId] = useState(aktualnyTyp?.winner_team_id ?? null);
+  // Inputy KONTROLOWANE (value, nie defaultValue) - dzięki temu widoczność
+  // dropdownu "Kto awansuje?" liczymy z AKTUALNEGO state'u, a nie z wartości
+  // początkowej. Wynik trzymamy jako string (inputy zwracają string).
+  const [localHome, setLocalHome] = useState(() => String(typ?.home_score ?? ''));
+  const [localAway, setLocalAway] = useState(() => String(typ?.away_score ?? ''));
+  const [winnerId, setWinnerId] = useState(typ?.winner_team_id ?? null);
 
-  // Reset local state gdy typ się zmieni (po zapisie)
-  if (aktualnyTyp && (Number(localHome) !== aktualnyTyp.home_score || Number(localAway) !== aktualnyTyp.away_score)) {
-    setLocalHome(aktualnyTyp.home_score);
-    setLocalAway(aktualnyTyp.away_score);
-    setWinnerId(aktualnyTyp.winner_team_id ?? null);
+  // Synchronizacja PO udanym zapisie - tylko gdy zmieni się savedAt (nowy
+  // zapis), nie przy każdym renderze. To kluczowe: poprzednio porównywaliśmy
+  // local* z zapisanym typem przy każdym renderze, więc edycja inputu (np.
+  // 1:0 -> 1:1) była natychmiast cofana (BUG 2), a wybór awansującego znikał
+  // po zapisie (BUG 1). Teraz wartość z bazy nadpisuje local* dokładnie raz,
+  // przy świeżym sukcesie Server Action.
+  const [ostatniSave, setOstatniSave] = useState(null);
+  if (state?.ok && state.savedAt && state.savedAt !== ostatniSave) {
+    setOstatniSave(state.savedAt);
+    setLocalHome(String(state.typ.home_score ?? ''));
+    setLocalAway(String(state.typ.away_score ?? ''));
+    setWinnerId(state.typ.winner_team_id ?? null);
   }
 
-  const pokazDropdown = pucharowy && localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
+  const remis =
+    localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
+  const pokazDropdown = pucharowy && remis;
 
   // Gdy wynik przestaje być remisem, czyścimy wybór awansującego - inaczej
-  // ukryty dropdown trzymałby starą wartość winner_team_id i server odrzucałby
-  // zapis ("Wybór awansującego dotyczy tylko remisu w fazie pucharowej.").
+  // ukryty hidden input trzymałby starą wartość winner_team_id i server
+  // odrzucałby zapis ("Wybór awansującego dotyczy tylko remisu...").
   useEffect(() => {
-    const remis =
-      localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
     if (!remis && winnerId !== null) {
       setWinnerId(null);
     }
-  }, [localHome, localAway, winnerId]);
+  }, [remis, winnerId]);
 
   return (
     <form action={action}>
@@ -272,14 +280,13 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
           </span>
           <div className="flex shrink-0 items-center gap-1">
             <input
-              key={`home-${inputKey}`}
               type="number"
               name="homeScore"
               inputMode="numeric"
               min={0}
               max={20}
               required
-              defaultValue={aktualnyTyp?.home_score ?? ''}
+              value={localHome}
               placeholder="—"
               onChange={(e) => setLocalHome(e.target.value)}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
@@ -287,14 +294,13 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
             />
             <span className="text-emerald-300/70">:</span>
             <input
-              key={`away-${inputKey}`}
               type="number"
               name="awayScore"
               inputMode="numeric"
               min={0}
               max={20}
               required
-              defaultValue={aktualnyTyp?.away_score ?? ''}
+              value={localAway}
               placeholder="—"
               onChange={(e) => setLocalAway(e.target.value)}
               className="h-9 w-11 rounded-md border border-emerald-700/60 bg-emerald-950/60 text-center font-mono text-base text-emerald-50 placeholder-emerald-300/30 focus:border-emerald-400 focus:outline-none"
@@ -355,7 +361,6 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
             Kto awansuje?
           </label>
           <select
-            name="winnerId"
             value={winnerId ?? ''}
             onChange={(e) => setWinnerId(e.target.value ? Number(e.target.value) : null)}
             required

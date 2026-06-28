@@ -2,7 +2,7 @@
 //   bonus_points - SUM(points) z bonus_answers,
 //   match_points - SUM(points) z predictions,
 //   total_points - suma obu.
-// Sort malejąco po total_points, drugorzędnie po match_points.
+// Sort malejąco po total_points, potem match_points, potem idealne (T/B).
 //
 // Robimy to po stronie JS - 3 osobne SELECT-y i merge - bo Supabase JS
 // nie pozwala wygodnie na agregację po user_id w jednym zapytaniu bez
@@ -49,9 +49,14 @@ export default async function RankingPage() {
   }
 
   const sumaMecze = new Map();
+  // IDEALNE - liczba dokładnie trafionych wyników (points === 3) per user.
+  const idealne = new Map();
   for (const m of mecze || []) {
     if (m.points == null) continue;
     sumaMecze.set(m.user_id, (sumaMecze.get(m.user_id) || 0) + m.points);
+    if (m.points === 3) {
+      idealne.set(m.user_id, (idealne.get(m.user_id) || 0) + 1);
+    }
   }
 
   // Sortujemy tu, ale POZYCJĘ wylicza już TabelaRankingu (client) - po
@@ -66,12 +71,14 @@ export default async function RankingPage() {
         is_bot: !!p.is_bot,
         bonus_points,
         match_points,
+        idealne: idealne.get(p.id) || 0,
         total_points: bonus_points + match_points,
       };
     })
     .sort((a, b) => {
       if (b.total_points !== a.total_points) return b.total_points - a.total_points;
-      return b.match_points - a.match_points;
+      if (b.match_points !== a.match_points) return b.match_points - a.match_points;
+      return b.idealne - a.idealne;
     });
 
   return (

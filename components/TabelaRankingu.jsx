@@ -63,6 +63,12 @@ export default function TabelaRankingu({ wiersze, aktualnyUserId }) {
                 <th className="px-3 py-3 text-left">Nick</th>
                 <th className="hidden px-3 py-3 text-right sm:table-cell">Bonus</th>
                 <th className="hidden px-3 py-3 text-right sm:table-cell">Mecze</th>
+                <th
+                  className="hidden px-3 py-3 text-right sm:table-cell"
+                  title="Liczba dokładnie trafionych wyników"
+                >
+                  T/B
+                </th>
                 <th className="px-3 py-3 text-right">Suma</th>
               </tr>
             </thead>
@@ -108,7 +114,7 @@ export default function TabelaRankingu({ wiersze, aktualnyUserId }) {
                           )}
                         </Link>
                         <span className="text-xs text-emerald-200/60 sm:hidden">
-                          bonus {w.bonus_points} · mecze {w.match_points}
+                          bonus {w.bonus_points} · mecze {w.match_points} · T/B {w.idealne}
                         </span>
                       </div>
                     </td>
@@ -117,6 +123,12 @@ export default function TabelaRankingu({ wiersze, aktualnyUserId }) {
                     </td>
                     <td className="hidden px-3 py-3 text-right font-mono text-emerald-100/90 sm:table-cell">
                       {w.match_points}
+                    </td>
+                    <td
+                      className="hidden px-3 py-3 text-right font-mono text-emerald-100/90 sm:table-cell"
+                      title="Liczba dokładnie trafionych wyników"
+                    >
+                      {w.idealne}
                     </td>
                     <td className="px-3 py-3 text-right">
                       <span className="font-mono text-base font-bold text-emerald-50">
