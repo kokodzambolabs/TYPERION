@@ -27,6 +27,31 @@ const SchematCompetition = z
     message: 'Niedozwolony kod rozgrywek.',
   });
 
+// Football-Data zwraca etapy pucharowe długimi nazwami (LAST_16, ...),
+// a my w bazie trzymamy krótkie kody (R16, ...) - czyPucharowy() i kod
+// rankingu/statystyk zakładają krótki wariant. Normalizujemy LONG → SHORT
+// przy zapisie, żeby nowe mecze nie psuły spójności.
+// Idempotentne: krótki kod mapuje się na samego siebie, GROUP_* zostaje.
+const MAPOWANIE_ETAPOW_IMPORT = {
+  LAST_32: 'R32',
+  LAST_16: 'R16',
+  QUARTER_FINALS: 'QF',
+  SEMI_FINALS: 'SF',
+  THIRD_PLACE_FINAL: 'THIRD_PLACE',
+  FINAL: 'FINAL',
+  R32: 'R32',
+  R16: 'R16',
+  QF: 'QF',
+  SF: 'SF',
+  THIRD_PLACE: 'THIRD_PLACE',
+};
+
+function normalizujEtap(stage) {
+  if (!stage) return null;
+  if (stage.startsWith('GROUP_')) return stage;
+  return MAPOWANIE_ETAPOW_IMPORT[stage] || stage;
+}
+
 // `opcje.tylkoPrzyszle`: true (domyślnie) - z API zaciągamy tylko nieskończone
 // mecze; false - importujemy też FINISHED (przydatne przy pierwszym imporcie
 // historii albo gdyby admin chciał odtworzyć wyniki).
@@ -124,11 +149,12 @@ export async function importujMecze(competition = 'WC', opcje = {}) {
     // 'QUARTER_FINAL', ...). Trzymamy obie wartości w jednej kolumnie -
     // formatGrupa() w lib/format.js umie ładnie wyświetlić oba warianty.
     // Dla ligowych meczów zostawiamy null.
-    const groupName =
+    const groupName = normalizujEtap(
       apiMecz.group ||
-      (apiMecz.stage && apiMecz.stage !== 'REGULAR_SEASON'
-        ? apiMecz.stage
-        : null);
+        (apiMecz.stage && apiMecz.stage !== 'REGULAR_SEASON'
+          ? apiMecz.stage
+          : null),
+    );
 
     // Już w bazie? Backfillujemy competition_code/group_name jeśli NULL.
     // Wartości już ustawionych NIE NADPISUJEMY - może admin coś poprawił

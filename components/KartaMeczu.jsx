@@ -23,7 +23,7 @@
 // świeży typ - state z action ma pierwszeństwo nad propem; "✓ Zapisano"
 // flashuje przez 2s dzięki CSS keyframes (flash-zapisano w globals.css).
 
-import { useActionState, useMemo, useState, useTransition } from 'react';
+import { useActionState, useEffect, useMemo, useState, useTransition } from 'react';
 import BadgePunktow from './BadgePunktow';
 import PanelCudzychTypow from './SekcjaCudzychTypow';
 import { formatujDateKrotkoPL, formatGrupa } from '@/lib/format';
@@ -239,6 +239,17 @@ function RzadScheduled({ mecz, typ, home, away, grupaEtykieta, flashscoreUrl, pu
   }
 
   const pokazDropdown = pucharowy && localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
+
+  // Gdy wynik przestaje być remisem, czyścimy wybór awansującego - inaczej
+  // ukryty dropdown trzymałby starą wartość winner_team_id i server odrzucałby
+  // zapis ("Wybór awansującego dotyczy tylko remisu w fazie pucharowej.").
+  useEffect(() => {
+    const remis =
+      localHome !== '' && localAway !== '' && Number(localHome) === Number(localAway);
+    if (!remis && winnerId !== null) {
+      setWinnerId(null);
+    }
+  }, [localHome, localAway, winnerId]);
 
   return (
     <form action={action}>

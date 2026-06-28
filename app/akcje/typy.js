@@ -48,7 +48,8 @@ export async function zapiszTyp(_prev, formData) {
   });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
-  const { matchId, homeScore, awayScore, winnerId } = parsed.data;
+  const { matchId, homeScore, awayScore } = parsed.data;
+  let winnerId = parsed.data.winnerId;
 
   const { data: mecz, error: meczE } = await supabase
     .from('matches')
@@ -79,12 +80,12 @@ export async function zapiszTyp(_prev, formData) {
       };
     }
   } else {
-    // We wszystkich innych przypadkach winnerId MUSI być null
-    if (winnerId != null) {
-      return {
-        error: 'Wybór awansującego dotyczy tylko remisu w fazie pucharowej.',
-      };
-    }
+    // Pucharowy nie-remis ALBO grupowy - wymuszamy null.
+    // Defense in depth: frontend powinien już sczyścić winnerId, ale gdyby
+    // została stara wartość (np. user zmienił remis na zwycięstwo), po prostu
+    // ją ignorujemy zamiast blokować zapis. To nie dziura bezpieczeństwa -
+    // logika rozliczania i tak liczy awans tylko dla "pucharowy + remis".
+    winnerId = null;
   }
 
   const teraz = new Date().toISOString();
